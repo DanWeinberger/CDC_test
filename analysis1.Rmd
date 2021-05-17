@@ -1,0 +1,261 @@
+---
+title: "Excess death in Mexico City and NYC"
+author: "Dan Weinberger"
+date: "10/29/2020"
+output:
+  html_document:
+    df_print: paged
+    html_document: null
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+  word_document:
+    toc: yes
+    toc_depth: '2'
+  pdf_document: 
+    keep_tex:  true
+params:
+  agg.level: 'state'
+  n.days.filter: 20
+  web.version: FALSE
+  extrap.date: '2020-01-26'
+  count.start.date: '2020-03-01'
+  end.data.date: '2020-09-05'
+---
+
+```{r, include = F}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  echo=F,
+  warning=FALSE, 
+  message=FALSE,
+  comment = "#>",
+  dev=c('png','pdf'),
+  fig.path='./figures/',
+  gganimate = list(
+    nframes = 50)
+)
+
+extrap.date <-  as.Date(params$extrap.date)
+count.start.date <- as.Date(params$count.start.date)
+end.data.date <- as.Date(params$end.data.date)
+
+state.name2 <- c(state.name, 'District of Columbia','Puerto Rico', 'United States', 'New York City')
+state.abb2 <- c(state.abb, 'DC','PR','US','NYC')
+
+
+last.date.format <- 
+  format(end.data.date, '%b %d, %Y')
+```
+
+```{r setup}
+library(ExcessILI)
+library(readxl)
+library(cdcfluview)
+library(reshape2)
+library(ggplot2)
+library(lubridate)
+library(RColorBrewer)
+library(plotly)
+library(MMWRweek)
+library(readr)
+library(rjson)
+library(htmlTable)
+library(RSocrata)
+library(pdftools)
+library(readr)
+library(abind)
+library(gsubfn)
+library(dplyr)
+library(RCurl)
+library(tidyverse)
+library(gifski)
+library(gganimate)
+#library(jsonlite)
+set.seed(123)
+source('./functions/ts_plot_func.R')
+source('./functions/format_table.R')
+source('./functions/stack_plot.R')
+
+```
+
+```{r archivfunc}
+# Using ExcessILI's data archiving functions, returns the most recent copy of
+# output obtained by running a function or formula \code{f}, unless this 
+# copy doesn't exist or is older (by modification time) than \code{maxage}.
+# In that case, \code{f} is run and the output is archived into the folder
+# Data/'storeName' as an RDS file, using the function ExcessILI::storeRDS.
+#
+# @param storeName A string. The name of the folder to store output in
+# @param f A function or formula taking no arguments. Formulas are coerced to
+#   functions.
+# @param maxage How old can any existing archived file be before \code{f} is 
+#   called again?
+runIfExpired <- function(storeName, f, maxage=hours(99999999999999)) {
+  basepath <- "Data/"
+  mostRecent <- mostRecentTimestamp(storeName, basepath=basepath)
+  f <- rlang::as_function(f)
+  
+  runAndArchive <- function() {
+    data <- f()
+    storeRDS(data, storeName, basepath)
+    data
+  }
+    
+  if (is.na(mostRecent)) 
+    return(runAndArchive())
+
+  if (mostRecent %--% now() < maxage)
+    return(retrieveRDS(storeName, basepath))
+
+  runAndArchive()
+}
+```
+
+```{r, eval=F}
+if (!require("devtools")) {
+  install.packages("devtools")
+}
+devtools::install_github("weinbergerlab/ExcessILI")
+```
+
+## Download and archive the latest version of the data from NCHS
+If >24 hours old, download a new copy
+```{r}
+nchs.age.state <- runIfExpired('nchs_age_state', maxage=24,
+ ~read.csv("https://data.cdc.gov/api/views/y5bj-9g5w/rows.csv?accessType=DOWNLOAD") 
+ )
+
+```
+
+```{r}
+age1 <- nchs.age.state
+age1 <- age1[ age1$Type=='Unweighted' & age1$Suppress =='',]
+age1 <- age1[,c('Week.Ending.Date', 'Age.Group','Number.of.Deaths', 'State.Abbreviation' )]
+age1$Week.Ending.Date <- as.Date(age1$Week.Ending.Date, '%m/%d/%Y')
+
+
+#Cut off last 2 months of data--incomplete reporting
+max.date <- max(age1$Week.Ending.Date)
+age1 <- age1[age1$Week.Ending.Date<= (max.date-60),]
+
+names(age1) <-c('week_end','age_group','all_cause','state')
+age1$one <-1
+```
+
+Filter data by sparsity. Some subgroups are suppressed
+**CAUTION** many strata, particularly from smaller states get filtered out here, so need to be careful about aggregate values.
+
+For now, only keep states that have all 6 age categories
+```{r}
+age.spl <- split(age1, paste0(age1$age_group, age1$state))
+n.obs.weeks <- sapply(age.spl, nrow)
+max.obs.weeks <- max(n.obs.weeks, na.rm=T)
+
+age.spl <- age.spl[n.obs.weeks==max.obs.weeks]
+
+age2 <- bind_rows(age.spl)
+
+age2.spl <- split(age2, age2$state)
+n.ages.state <- sapply(age2.spl, nrow)/max.obs.weeks
+age2.spl <- age2.spl[n.ages.state==6]
+
+ag3 <- bind_rows(age2.spl)
+```
+
+
+
+## run the model
+```{r}
+
+mod1 <- excessCases(ag3, 
+             statevar = "state",
+             agevar='age_group',
+             datevar = "week_end", 
+             use.syndromes = c("all_cause"),
+            extrapolation.date = as.Date("2020-03-01"), 
+            sum.dates = as.Date("2020-03-01"),
+            denom.var = "one",
+            extend.epiyear =TRUE,
+            time.res='week',
+            model.type='poisson') 
+```
+
+## Interactive dashboard plot
+```{r}
+dashboardPlot(mod1) 
+
+```
+
+## Heatmap type dashboard
+
+```{r}
+dashboardPlotOe(mod1,  statevar = "state",
+             agevar='age_group',
+             datevar = "date", outcome='all_cause', 
+             yaxis=statevar, facet=agevar)
+```
+
+
+
+Extract output as arrays
+ Can use this to calculate all sorts of custom things, like excess aggregated over different time periods. Some of the outputs contain draws from a Monte Carlo simulation, which can be used for propagating errors. For example, below we have sum.obs.ac gives the total deaths during the evaluation periods, and sum.pred.iter gives 10,000 values of the sum predicted value. These could be combined across strata
+```{r}
+ds <- mod1
+dates1 <-
+  ds[[1]][[1]][[1]]$date
+  
+sum.obs.ac <-
+    excessExtract(ds = ds,
+                syndrome = 'all_cause',
+                extract.quantity = "sum.obs")
+
+sum.pred.iter <-
+    excessExtract(ds = ds,
+                syndrome = 'all_cause',
+                extract.quantity = "sum.pred.iter")
+
+```
+
+## Sum across age groups, by state
+Print the 95% CIs for the RR (overall observed/expected deaths by state)
+```{r}
+
+pred.state.iter <- apply(sum.pred.iter,c(1,2), sum)
+
+sum.obs.ac.state <- apply(sum.obs.ac, c(2), sum)
+
+RR.state <- apply(pred.state.iter,1, function(x) sum.obs.ac.state/x)
+RR.state.q <- round(t(apply(RR.state,1,quantile, probs=c(0.025,0.5,0.975))),2)
+RR.state.q
+
+```
+
+
+
+```{r}
+excess_output = mod1
+            statevar = "state"
+             agevar='age_group'
+             datevar = "date" 
+             outcome='all_cause' 
+             yaxis=statevar
+             facet=agevar
+
+
+  df_y <- 
+    excess_output  %>% 
+    pluck(outcome) %>% 
+    map(~(
+      transpose(.x) %>% 
+        map(~(.x %>% bind_rows())) %>% .[c(datevar, "y")] %>% 
+        map(~(.x %>% gather(statevar, y))) %>% 
+        bind_cols()  %>% 
+        set_names(c(statevar, datevar, "rm", "y")) %>% 
+        dplyr::select(-rm)
+    )) %>% 
+    bind_rows(.id = agevar) 
+  
+  
+```
+
