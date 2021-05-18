@@ -73,9 +73,6 @@ library(gifski)
 library(gganimate)
 #library(jsonlite)
 set.seed(123)
-source('./functions/ts_plot_func.R')
-source('./functions/format_table.R')
-source('./functions/stack_plot.R')
 
 ```
 
