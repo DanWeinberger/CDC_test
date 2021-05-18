@@ -1,5 +1,5 @@
 ---
-title: "Excess death in Mexico City and NYC"
+title: "Excess death in the US by age"
 author: "Dan Weinberger"
 date: "10/29/2020"
 output:
