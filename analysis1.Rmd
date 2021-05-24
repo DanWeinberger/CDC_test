@@ -117,9 +117,9 @@ devtools::install_github("weinbergerlab/ExcessILI")
 ```
 
 ## Download and archive the latest version of the data from NCHS
-If >24 hours old, download a new copy
+set maxage to a small number (e.g. 24, for 24 hours) if you want to to download a recent copy of the data; otherwise it will use the most recent copy on disk in the Data/nchs_age_state folder
 ```{r}
-nchs.age.state <- runIfExpired('nchs_age_state', maxage=24,
+nchs.age.state <- runIfExpired('nchs_age_state', maxage=99999,
  ~read.csv("https://data.cdc.gov/api/views/y5bj-9g5w/rows.csv?accessType=DOWNLOAD") 
  )
 
