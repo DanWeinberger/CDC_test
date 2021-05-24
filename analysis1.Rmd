@@ -71,6 +71,7 @@ library(RCurl)
 library(tidyverse)
 library(gifski)
 library(gganimate)
+library(shiny)
 #library(jsonlite)
 set.seed(123)
 
