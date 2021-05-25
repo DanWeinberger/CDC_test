@@ -1,0 +1,13 @@
+name: ExcessAgeUS
+title: ExcessAgeUS
+username:
+account: weinbergerlab
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 4178782
+bundleId: 4635058
+url: https://weinbergerlab.shinyapps.io/ExcessAgeUS/
+when: 1621894022.11081
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: analysis1.Rmd|results1.rds|Data/nchs_age_state/2021_05_17_15_11.rds|Data/nchs_age_state/2021_05_18_10_30.rds|Data/nchs_age_state/2021_05_24_12_49.rds|outputs/summary_with_var.csv
