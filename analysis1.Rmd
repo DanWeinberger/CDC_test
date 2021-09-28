@@ -493,68 +493,34 @@ preds.select<-grep('Predictor',post.labels )
 
 posterior.preds<-exp(posterior.samples[preds.select,]) #lambda
 
-preds.summary <- apply(posterior.preds,1, quantile, probs=c(0.025,0.5,0.975))
+preds.summary <- t(apply(posterior.preds,1, quantile, probs=c(0.025,0.5,0.975)))
 
 ag3.preds <- cbind.data.frame(preds.summary,ag3)
 
+summary.list <- list( 'ag3.preds'=ag3.preds)
+
+saveRDS(summary.list,'./Data/INLA_results.rds')
+
 ```
 
+```{r, fig.width=8, fig.height=12}
+summary.list <- readRDS('./Data/INLA_results.rds')
 
-Simple RSTANARM model
-```{r}
+summary.spl <- split(summary.list[[1]], paste(summary.list[[1]]$state, summary.list[[1]]$age_group ))
 
+states <- sapply(summary.spl, function(x) unique(x$state))
+ages <- sapply(summary.spl, function(x) unique(x$age_group))
 
-library(rstanarm)
-#Vanilla harmonic regression runs in 2 minutes)
-mod.stan.glm1 <- rstanarm::stan_glm(all_cause_pre ~ 
-                1 + time_scale + 
-                sin1+sin2 +sin3 +cos1 +cos2 +cos3, # + 
-                #age_group + 
-                #  state ,
-                offset = log.ave.case,
-                family='poisson', data=ag3,cores=3,chains=3, QR=T,
-                prior_intercept = normal(0,5) ,
-                 prior = normal(0,1),
-                      seed = 12345)
-pplot<-plot(mod.stan.glm1, "areas", prob = 0.95, prob_outer = 1)
-pplot+ geom_vline(xintercept = 0)              
-```
+summary.spl.85plus <- summary.spl[ages=='85 years and older']
 
-Try with horseshoe prior and all the interactions
+par(mfrow=c(6,3), mar=c(2,2,1,1))
+lapply(summary.spl.85plus, function(x){
+  plot(x$week_end, x$all_cause, type='l', bty='l', main=unique(x$state))
+  points(x$week_end, x$'50%', type='l', col='red', lty=2)
+  points(x$week_end, x$'50%', type='l', col='red', lty=2)
+  abline(v=as.Date('2020-03-01'), lty=2, col='gray')
+  })
 
-```{r}
-p0 <- 10 # prior guess for the number of relevant variables
-mod.mat1 <- model.matrix(~1 +  
-                state*age_group*(time_scale+ sin1+sin2 +sin3 +cos1 +cos2 +cos3), data=ag3)
-n <- nrow(ag3)
-p <- ncol(mod.mat1)
-tau0 <- p0/(p-p0) * 1/sqrt(n)
-hs_prior <- hs(df=1, global_df=1, global_scale=tau0)
-
-mod.stan.glm2 <- rstanarm::stan_glm(all_cause_pre ~ 
-                1 +  
-                state*age_group*(time_scale+ sin1+sin2 +sin3 +cos1 +cos2 +cos3), 
-                offset = log.ave.case,
-                family='poisson', data=ag3,cores=3,chains=3, QR=T,
-                prior_intercept = normal(0,1) ,
-                 prior = hs_prior,
-                      seed = 12345)
-```
-
-
-Add random slope for the harmonics
-```{r}
-mod.stan.glmer1 <- rstanarm::stan_glmer(all_cause_pre ~ 
-                1 + time_scale + 
-                sin1+sin2 +sin3 +cos1 +cos2 +cos3+
-                  (0+sin1|age_group) , 
-                offset = log.ave.case,
-                family='poisson', data=ag3,cores=3,chains=3, QR=T,
-                prior_intercept = normal(0,5) ,
-                 prior = normal(0,1),
-                      seed = 12345)
-pplot<-plot(mod.stan.glmer1, "areas", prob = 0.95, prob_outer = 1)
-pplot+ geom_vline(xintercept = 0)
 ```
 
 
