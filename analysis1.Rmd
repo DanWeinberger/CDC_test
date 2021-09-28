@@ -387,11 +387,11 @@ jags_post <- jags.model(textConnection(model_string_non_nested), data = dataset,
 INLA
 ```{r}
 library(INLA)
-data('eggs')
+library(lme4)
 
 ag3 <- readRDS('./Data/cleaned_file.rds')
 
-ag3$time <- 1:dim(ag3.c)[3]
+ag3$time <- 1:length(unique(ag3$week_end))
 ag3$sin1 <- sin(2*pi*ag3$time/52.1775)
 ag3$sin2 <- sin(2*pi*ag3$time*2/52.1775)
 ag3$sin3 <- sin(2*pi*ag3$time*3/52.1775)
@@ -400,7 +400,149 @@ ag3$cos1 <- cos(2*pi*ag3$time/52.1775)
 ag3$cos2 <- cos(2*pi*ag3$time*2/52.1775)
 ag3$cos3 <- cos(2*pi*ag3$time*3/52.1775)
  
-mod.inla <- inla(all_cause ~  , family='poisson')
+ag3$age_group <- as.factor(ag3$age_group)
+ag3$state <- as.factor(ag3$state)
+
+#mod.inla <- inla(all_cause ~  , family='poisson')
+
+ag3$all_cause_pre <- ag3$all_cause
+
+ag3$all_cause_pre[ag3$week_end >= '2020-03-01'] <- NA
+ag3$time_scale <- as.vector(scale(ag3$time))
+
+ag3.pre <- ag3[ag3$week_end < '2020-03-01',] %>%
+  group_by(state,age_group) %>%
+  summarize( log.ave.case = log(mean(all_cause)  ))
+  
+ag3 <- merge( ag3, ag3.pre, by=c('state','age_group'))
+# mod.lme1 <- lme4::glmer(all_cause_pre ~ 1 + time_scale + sin1+sin2 +sin3 +cos1 +cos2 +cos3  + (1|age_group) + 
+#                           (1|state) + 
+#                           (0+sin1 +cos1|age_group) +
+#                           (0+sin1 +cos1|state) +
+#                           (0+sin2 +cos2|age_group) +
+#                           (0+sin2 +cos2|state) +   
+#                           (0+sin3 +cos3|age_group) +
+#                           (0+sin3 +cos3|state) +
+#                           (0+time_scale|age_group) +
+#                           (0+time_scale|state) 
+#                         ,   family='poisson', data=ag3)
+# 
+# mod.lme1 <- lme4::glmer(all_cause_pre ~ 1 + time_scale + sin1+sin2 +sin3 +cos1 +cos2 +cos3  + 
+#           (1 + sin1 +cos1 + sin2 +cos2 + sin3 +cos3 + time_scale||age_group) 
+#                        ,   family='poisson', data=ag3)
+```
+
+Simple GLM
+```{r}
+mod.glm1 <- glm(all_cause_pre ~ 
+                1 + time_scale + 
+                sin1 + sin2 + sin3 + cos1 +cos2+ cos3 
+                offset = log.ave.case,
+                family='poisson', data=ag3)
+summary(mod.glm1)
+```
+
+Simple INLA
+```{r}
+mod.inla1 <- inla(all_cause_pre ~ 
+                1 + time_scale + 
+                sin1 + sin2 + sin3 + cos1 +cos2+ cos3  ,
+                offset = log.ave.case,
+                family='poisson', data=ag3)
+summary(mod.inla1)
+```
+
+```{r}
+ag3$state_ag_combo <- as.factor(paste(ag3$state, ag3$age_group))
+ag3$state_ag_combo2 <- ag3$state_ag_combo
+ag3$state_ag_combo3 <- ag3$state_ag_combo
+
+ag3$age_group2 <- ag3$age_group
+ag3$age_group3 <- ag3$age_group
+
+ag3$state2 <- ag3$state
+ag3$state3 <- ag3$state
+
+mod.inla2 <- inla(all_cause_pre ~ 
+                1 + time_scale + 
+                sin1 + sin2 + sin3 + cos1 +cos2+ cos3 +
+                 f(age_group, time_scale ,model='iid') +
+                 f(state, time_scale,model='iid') +
+                  f(state_ag_combo, time_scale,model='iid') +
+                  
+                f(age_group2, sin1 ,model='iid') +
+                 f(state2, sin1,model='iid') +
+                  f(state_ag_combo2, sin1,model='iid') +
+                  
+                  f(age_group3, cos1 ,model='iid') +
+                 f(state3, cos1,model='iid') +
+                  f(state_ag_combo3, cos1,model='iid') 
+                    ,
+                                offset = log.ave.case,
+                family='poisson', data=ag3,
+                control.compute=list(config = TRUE))
+summary(mod.inla2)
+
+pred.sample <- inla.posterior.sample(n=500, mod.inla2, seed=123)
+
+```
+
+
+Simple RSTANARM model
+```{r}
+
+
+library(rstanarm)
+#Vanilla harmonic regression runs in 2 minutes)
+mod.stan.glm1 <- rstanarm::stan_glm(all_cause_pre ~ 
+                1 + time_scale + 
+                sin1+sin2 +sin3 +cos1 +cos2 +cos3, # + 
+                #age_group + 
+                #  state ,
+                offset = log.ave.case,
+                family='poisson', data=ag3,cores=3,chains=3, QR=T,
+                prior_intercept = normal(0,5) ,
+                 prior = normal(0,1),
+                      seed = 12345)
+pplot<-plot(mod.stan.glm1, "areas", prob = 0.95, prob_outer = 1)
+pplot+ geom_vline(xintercept = 0)              
+```
+
+Try with horseshoe prior and all the interactions
+
+```{r}
+p0 <- 10 # prior guess for the number of relevant variables
+mod.mat1 <- model.matrix(~1 +  
+                state*age_group*(time_scale+ sin1+sin2 +sin3 +cos1 +cos2 +cos3), data=ag3)
+n <- nrow(ag3)
+p <- ncol(mod.mat1)
+tau0 <- p0/(p-p0) * 1/sqrt(n)
+hs_prior <- hs(df=1, global_df=1, global_scale=tau0)
+
+mod.stan.glm2 <- rstanarm::stan_glm(all_cause_pre ~ 
+                1 +  
+                state*age_group*(time_scale+ sin1+sin2 +sin3 +cos1 +cos2 +cos3), 
+                offset = log.ave.case,
+                family='poisson', data=ag3,cores=3,chains=3, QR=T,
+                prior_intercept = normal(0,1) ,
+                 prior = hs_prior,
+                      seed = 12345)
+```
+
+
+Add random slope for the harmonics
+```{r}
+mod.stan.glmer1 <- rstanarm::stan_glmer(all_cause_pre ~ 
+                1 + time_scale + 
+                sin1+sin2 +sin3 +cos1 +cos2 +cos3+
+                  (0+sin1|age_group) , 
+                offset = log.ave.case,
+                family='poisson', data=ag3,cores=3,chains=3, QR=T,
+                prior_intercept = normal(0,5) ,
+                 prior = normal(0,1),
+                      seed = 12345)
+pplot<-plot(mod.stan.glmer1, "areas", prob = 0.95, prob_outer = 1)
+pplot+ geom_vline(xintercept = 0)
 ```
 
 
