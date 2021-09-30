@@ -73,6 +73,8 @@ library(gifski)
 library(gganimate)
 library(shiny)
 library(rjags)
+library(INLA)
+library(lme4)
 #library(jsonlite)
 set.seed(123)
 
@@ -276,7 +278,7 @@ shiny::shinyApp(ui, server)
         })
     }
     shiny::shinyApp(ui, server)
-}
+
 ```
 
 
@@ -372,7 +374,7 @@ pop1$age_group[pop1$AGE>=25 & pop1$AGE<45] <- '25-44 years'
 pop1$age_group[pop1$AGE>=45 & pop1$AGE<65] <- '45-64 years'
 pop1$age_group[pop1$AGE>=65 & pop1$AGE<75] <- '65-74 years'
 pop1$age_group[pop1$AGE>=75 & pop1$AGE<85] <- '75-84 years'
-pop1$age_group[pop1$AGE>=85 & pop1$AGE<85] <- '85 years and older' #category 85=85+; cat 999 is all combined
+pop1$age_group[pop1$AGE>=85 & pop1$AGE<110] <- '85 years and older' #category 85=85+; cat 999 is all combined
 
 pop1$state2 <- state.abb[match(pop1$NAME,state.name)]
 pop1$state2[pop1$NAME=='District of Columbia'] <- 'DC'
@@ -382,20 +384,50 @@ pop1.m <- reshape2::melt(pop1[pop1$SEX==0 & pop1$ORIGIN==0 ,c('age_group','state
 pop2 <- reshape2::dcast(pop1.m, age_group + state2 + variable ~., fun.aggregate = sum)
 pop2$year <- as.numeric(gsub( 'POPESTIMATE','',as.character(pop2$variable)))
 
-names(pop2) <- c('age_group','state','variable','popsize')
+names(pop2) <- c('age_group','state','variable','popsize','year')
 
-pop2 <- pop2[,c('age_group','state','popsize')]
+pop2 <- pop2[,c('age_group','state','popsize','year')]
 
+pop2$weekN <- 27 #July 1
+
+pop2 <- pop2[pop2$state !='US',]
+
+#This is a hacky fix because we only have pop estimates up until July 2020; assume it is constant until july 2021 for now
+fill_2021 <- pop2[pop2$year==2020,]
+fill_2021$year <- 2021
+
+pop2 <- bind_rows(pop2, fill_2021)
+
+empty_ts <- readRDS('./Data/cleaned_file.rds')
+empty_ts <- empty_ts[,c('age_group','state','week_end')]
+empty_ts <- empty_ts[empty_ts$state!='US',]
+
+empty_ts$year <-year(empty_ts$week_end)
+empty_ts$weekN <-week(empty_ts$week_end)
+
+empty_ts2 <- merge(empty_ts, pop2, by=c('state','age_group','year','weekN'), all=T)
+
+filled_pop2 <- empty_ts2 %>%
+      group_by(age_group , state) %>%
+      arrange(age_group, state, year, weekN) %>%
+          mutate(time=seq(1,n())) %>%
+           mutate(pop.interpol=approx(time,popsize,time)$y)
+
+filled_pop2 <- filled_pop2[!is.na(filled_pop2$week_end),]
+
+filled_pop2 <- filled_pop2[,c('age_group','state','week_end','pop.interpol')]
+
+# test1 <- filled_pop2[filled_pop2$state=='NY' & filled_pop2$age_group=="75-84 years",]
+# plot(test1$week_end, test1$pop.interpol)
 ```
 
-## Multilevel model
+## Set up data for multilevel model
 
-INLA
 ```{r}
-library(INLA)
-library(lme4)
 
 ag3 <- readRDS('./Data/cleaned_file.rds')
+
+ag3 <- ag3[ag3$state!='US',]
 
 ag3$time <- 1:length(unique(ag3$week_end))
 ag3$sin1 <- sin(2*pi*ag3$time/52.1775)
@@ -422,9 +454,14 @@ ag3$time_scale <- as.vector(scale(ag3$time))
   
 #ag3 <- merge( ag3, ag3.pre, by=c('state','age_group'))
 
-ag3 <- merge(ag3, pop2, by=c('state','age_group'))
+ag3$year <- year(ag3$week_end)
+ag3$weekN <- week(ag3$week_end)
 
-ag3$log_pop <- log(ag3$popsize)
+
+ag3 <- merge(ag3, filled_pop2, by=c('state','age_group', 'week_end'), all.x=T)
+
+
+ag3$log_pop <- log(ag3$pop.interpol)
 
 ag3$state_ag_combo <- as.factor(paste(ag3$state, ag3$age_group))
 ag3$state_ag_combo2 <- ag3$state_ag_combo
@@ -436,10 +473,11 @@ ag3$age_group3 <- ag3$age_group
 ag3$state2 <- ag3$state
 ag3$state3 <- ag3$state
 
+ag3 <- ag3[!is.na(ag3$pop.interpol),]
+#ag3 <- ag3[ag3$year<=2020,]
 ```
 
-
-
+## Multilevel model
 
 Simple GLM
 ```{r}
@@ -455,16 +493,8 @@ mod.glm1 <- glm(all_cause_pre ~
 summary(mod.glm1)
 ```
 
-Simple INLA
-```{r}
-mod.inla1 <- inla(all_cause_pre ~ 
-                1 + time_scale + 
-                sin1 + sin2 + sin3 + cos1 +cos2+ cos3  + age_group +state ,
-                offset = log_pop,
-                family='poisson', data=ag3)
-summary(mod.inla1)
-```
-Runs in about 30 min
+
+Model fit takes about 1 min
 ```{r}
 
 mod.inla2 <- inla(all_cause_pre ~ 
@@ -518,7 +548,6 @@ lapply(unique(ages), function(y){
   summary.spl.age <- summary.spl[ages==y]
   par(mfrow=c(6,3), mar=c(2,2,1,1))
   lapply(summary.spl.age, function(x){
-    
     age_state_lab <- paste(unique(x$age_group),unique(x$state), sep=' ')
     
     plot(x$week_end, x$all_cause, type='l', bty='l', main=age_state_lab)
