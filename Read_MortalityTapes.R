@@ -2,14 +2,35 @@
 library(data.table)
 library(readr)
 library(dplyr)
+library(reshape2)
+library(tidyr)
 
+#the geographic resolution missing from the public data
 
-try2 <- read_fwf(file="./CDC_tapes/VS14MORT.DUSMCPUB",
-                fwf_positions(start=c(20,21,65,69,102,445,79,484,146),
-                              end=c(20,34,66,69,105,446,80,486,149),
-                              col_names = c('res_status','state','month','sex','year','race','agec','hispanic','icd1')),
-                n_max=500000, guess_max=10000)
-View(try2)
+file.names1<- list('VS14MORT.DUSMCPUB', 'VS15MORT.DUSMCPUB','VS16MORT.DUSMCPUB',
+             'Mort2018US.PubUse.txt','VS19MORT.DUSMCPUB_r20210304')
+
+all.ds <- lapply(file.names1, function(x){
+  d1 <- read_fwf(file=paste0("./CDC_tapes/" ,x),
+                 fwf_positions(start=c(20,21,65,69,102,445,79,484,146),
+                               end=c(20,34,66,69,105,446,80,486,149),
+                               col_names = c('res_status','state','month','sex','year','race','agec','hispanic','icd1')),
+                  guess_max=10000)
+  return(d1)
+})
+
+df1 <- bind_rows(all.ds)
+saveRDS(df1, './CDC_tapes/compiled_data.rds')
+df1$one <-1
+
+#Tidyverse version
+agg1 <- all.ds %>%
+  bind_rows() %>% 
+  mutate(one=1) %>%
+  reshape2::dcast( month+year+sex+agec ~ ., fun.aggregate = length, value.var='one')  %>%
+  mutate(date= as.Date(paste(year, month,'01',sep='-') ))
+       
+agg1 <- agg1[order(agg1$agec, agg1$sex, agg1$date),] 
 
 
 # Agec
