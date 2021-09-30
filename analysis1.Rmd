@@ -72,6 +72,7 @@ library(tidyverse)
 library(gifski)
 library(gganimate)
 library(shiny)
+library(rjags)
 #library(jsonlite)
 set.seed(123)
 
@@ -121,7 +122,7 @@ devtools::install_github("weinbergerlab/ExcessILI")
 ## Download and archive the latest version of the data from NCHS
 set maxage to a small number (e.g. 24, for 24 hours) if you want to to download a recent copy of the data; otherwise it will use the most recent copy on disk in the Data/nchs_age_state folder
 ```{r}
-nchs.age.state <- runIfExpired('nchs_age_state', maxage=9999999,
+nchs.age.state <- runIfExpired('nchs_age_state', maxage=999,
  ~read.csv("https://data.cdc.gov/api/views/y5bj-9g5w/rows.csv?accessType=DOWNLOAD") 
  )
 
@@ -162,7 +163,9 @@ n.ages.state <- sapply(age2.spl, nrow)/max.obs.weeks
 age2.spl <- age2.spl[n.ages.state==6]
 
 ag3 <- bind_rows(age2.spl)
+saveRDS(ag3,'./Data/cleaned_file.rds')
 ```
+
 
 
 
@@ -339,4 +342,185 @@ excess_output = mod1
   
   
 ```
+## Multilevel model
+
+JAGS
+```{r}
+ag3 <- readRDS('./Data/cleaned_file.rds')
+
+source('./R/jags_mod1.R')
+
+ag3.m <- reshape2::melt(ag3, id.vars=c('age_group','state','week_end'))
+ag3.c <- acast(ag3.m[ag3.m$variable=='all_cause',], age_group ~ state ~week_end)
+
+time <- 1:dim(ag3.c)[3]
+sin1 <- sin(2*pi*time/52.1775)
+sin2 <- sin(2*pi*time*2/52.1775)
+sin3 <- sin(2*pi*time*3/52.1775)
+
+cos1 <- cos(2*pi*time/52.1775)
+cos2 <- cos(2*pi*time*2/52.1775)
+cos3 <- cos(2*pi*time*3/52.1775)
+
+dataset <- list('y' = ag3.c, 
+                'n.date'=dim(ag3.c)[3],
+                'n.age'=dim(ag3.c)[1],
+                "n.state"=dim(ag3.c)[2],
+                'sin1'=sin1,
+                'sin2'=sin2,
+                'sin3'=sin3,
+                'cos1'=cos1,
+                'cos2'=cos2,
+                'cos3'=cos3,
+                'time'=time
+                )
+
+jags_post <- jags.model(textConnection(model_string_non_nested), data = dataset,
+                    n.chains = 3)
+ update(jags_post, 
+         n.iter=75000)
+  rsv_resp <- coda.samples(jags_post, variable.names=c("rd2","lambda","rd1","phi", "rd0","epi","delta"),
+                      thin = 20,n.iter = 60000)
+
+```
+
+INLA
+```{r}
+library(INLA)
+library(lme4)
+
+ag3 <- readRDS('./Data/cleaned_file.rds')
+
+ag3$time <- 1:length(unique(ag3$week_end))
+ag3$sin1 <- sin(2*pi*ag3$time/52.1775)
+ag3$sin2 <- sin(2*pi*ag3$time*2/52.1775)
+ag3$sin3 <- sin(2*pi*ag3$time*3/52.1775)
+
+ag3$cos1 <- cos(2*pi*ag3$time/52.1775)
+ag3$cos2 <- cos(2*pi*ag3$time*2/52.1775)
+ag3$cos3 <- cos(2*pi*ag3$time*3/52.1775)
+ 
+ag3$age_group <- as.factor(ag3$age_group)
+ag3$state <- as.factor(ag3$state)
+
+#mod.inla <- inla(all_cause ~  , family='poisson')
+
+ag3$all_cause_pre <- ag3$all_cause
+
+ag3$all_cause_pre[ag3$week_end >= '2020-03-01'] <- NA
+ag3$time_scale <- as.vector(scale(ag3$time))
+
+ag3.pre <- ag3[ag3$week_end < '2020-03-01',] %>%
+  group_by(state,age_group) %>%
+  summarize( log.ave.case = log(mean(all_cause)  ))
+  
+ag3 <- merge( ag3, ag3.pre, by=c('state','age_group'))
+# mod.lme1 <- lme4::glmer(all_cause_pre ~ 1 + time_scale + sin1+sin2 +sin3 +cos1 +cos2 +cos3  + (1|age_group) + 
+#                           (1|state) + 
+#                           (0+sin1 +cos1|age_group) +
+#                           (0+sin1 +cos1|state) +
+#                           (0+sin2 +cos2|age_group) +
+#                           (0+sin2 +cos2|state) +   
+#                           (0+sin3 +cos3|age_group) +
+#                           (0+sin3 +cos3|state) +
+#                           (0+time_scale|age_group) +
+#                           (0+time_scale|state) 
+#                         ,   family='poisson', data=ag3)
+# 
+# mod.lme1 <- lme4::glmer(all_cause_pre ~ 1 + time_scale + sin1+sin2 +sin3 +cos1 +cos2 +cos3  + 
+#           (1 + sin1 +cos1 + sin2 +cos2 + sin3 +cos3 + time_scale||age_group) 
+#                        ,   family='poisson', data=ag3)
+```
+
+Simple GLM
+```{r}
+mod.glm1 <- glm(all_cause_pre ~ 
+                1 + time_scale + 
+                sin1 + sin2 + sin3 + cos1 +cos2+ cos3 
+                offset = log.ave.case,
+                family='poisson', data=ag3)
+summary(mod.glm1)
+```
+
+Simple INLA
+```{r}
+mod.inla1 <- inla(all_cause_pre ~ 
+                1 + time_scale + 
+                sin1 + sin2 + sin3 + cos1 +cos2+ cos3  ,
+                offset = log.ave.case,
+                family='poisson', data=ag3)
+summary(mod.inla1)
+```
+
+```{r}
+ag3$state_ag_combo <- as.factor(paste(ag3$state, ag3$age_group))
+ag3$state_ag_combo2 <- ag3$state_ag_combo
+ag3$state_ag_combo3 <- ag3$state_ag_combo
+
+ag3$age_group2 <- ag3$age_group
+ag3$age_group3 <- ag3$age_group
+
+ag3$state2 <- ag3$state
+ag3$state3 <- ag3$state
+
+mod.inla2 <- inla(all_cause_pre ~ 
+                1 + time_scale + 
+                sin1 + sin2 + sin3 + cos1 +cos2+ cos3 +
+                 f(age_group, time_scale ,model='iid') +
+                 f(state, time_scale,model='iid') +
+                  f(state_ag_combo, time_scale,model='iid') +
+                  
+                f(age_group2, sin1 ,model='iid') +
+                 f(state2, sin1,model='iid') +
+                  f(state_ag_combo2, sin1,model='iid') +
+                  
+                  f(age_group3, cos1 ,model='iid') +
+                 f(state3, cos1,model='iid') +
+                  f(state_ag_combo3, cos1,model='iid') 
+                    ,
+                                offset = log.ave.case,
+                family='poisson', data=ag3,
+                control.compute=list(config = TRUE))
+summary(mod.inla2)
+
+pred.sample.list <- inla.posterior.sample(n=500, mod.inla2, seed=123)
+
+post.labels<-dimnames(pred.sample.list[[1]]$latent)[[1]]
+
+posterior.samples<- sapply(pred.sample.list, '[[', 'latent')
+
+preds.select<-grep('Predictor',post.labels )
+
+posterior.preds<-exp(posterior.samples[preds.select,]) #lambda
+
+preds.summary <- t(apply(posterior.preds,1, quantile, probs=c(0.025,0.5,0.975)))
+
+ag3.preds <- cbind.data.frame(preds.summary,ag3)
+
+summary.list <- list( 'ag3.preds'=ag3.preds)
+
+saveRDS(summary.list,'./Data/INLA_results.rds')
+
+```
+
+```{r, fig.width=8, fig.height=12}
+summary.list <- readRDS('./Data/INLA_results.rds')
+
+summary.spl <- split(summary.list[[1]], paste(summary.list[[1]]$state, summary.list[[1]]$age_group ))
+
+states <- sapply(summary.spl, function(x) unique(x$state))
+ages <- sapply(summary.spl, function(x) unique(x$age_group))
+
+summary.spl.85plus <- summary.spl[ages=='85 years and older']
+
+par(mfrow=c(6,3), mar=c(2,2,1,1))
+lapply(summary.spl.85plus, function(x){
+  plot(x$week_end, x$all_cause, type='l', bty='l', main=unique(x$state))
+  points(x$week_end, x$'50%', type='l', col='red', lty=2)
+  points(x$week_end, x$'50%', type='l', col='red', lty=2)
+  abline(v=as.Date('2020-03-01'), lty=2, col='gray')
+  })
+
+```
+
 
