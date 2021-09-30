@@ -342,47 +342,53 @@ excess_output = mod1
   
   
 ```
-## Multilevel model
 
-JAGS
+
+## Population size data
+https://www.census.gov/programs-surveys/popest/technical-documentation/research/evaluation-estimates/2020-evaluation-estimates/2010s-state-detail.html
+Race:
+1 = White Alone
+2 = Black or African American Alone
+3 = American Indian or Alaska Native Alone
+4 = Asian Alone
+5 = Native Hawaiian and Other Pacific Islander Alone
+6 = Two or more races
+
+Sex: 
+0 = Total
+1 = Male
+2 = Female
+
+The key for ORIGIN is as follows:
+0 = Total
+1 = Not Hispanic
+2 = Hispanic
 ```{r}
-ag3 <- readRDS('./Data/cleaned_file.rds')
+pop1 <- read.csv('./Data/SC-EST2020-alldata6.csv')
 
-source('./R/jags_mod1.R')
+pop1$age_group <- NA
+pop1$age_group[pop1$AGE>=0 & pop1$AGE<25] <- '0-25 years'
+pop1$age_group[pop1$AGE>=25 & pop1$AGE<45] <- '25-44 years'
+pop1$age_group[pop1$AGE>=45 & pop1$AGE<65] <- '45-64 years'
+pop1$age_group[pop1$AGE>=65 & pop1$AGE<75] <- '65-74 years'
+pop1$age_group[pop1$AGE>=75 & pop1$AGE<85] <- '75-84 years'
+pop1$age_group[pop1$AGE>=85 & pop1$AGE<85] <- '85 years and older' #category 85=85+; cat 999 is all combined
 
-ag3.m <- reshape2::melt(ag3, id.vars=c('age_group','state','week_end'))
-ag3.c <- acast(ag3.m[ag3.m$variable=='all_cause',], age_group ~ state ~week_end)
+pop1$state2 <- state.abb[match(pop1$NAME,state.name)]
+pop1$state2[pop1$NAME=='District of Columbia'] <- 'DC'
 
-time <- 1:dim(ag3.c)[3]
-sin1 <- sin(2*pi*time/52.1775)
-sin2 <- sin(2*pi*time*2/52.1775)
-sin3 <- sin(2*pi*time*3/52.1775)
+pop1.m <- reshape2::melt(pop1[pop1$SEX==0 & pop1$ORIGIN==0 ,c('age_group','state2',"POPESTIMATE2010", "POPESTIMATE2011", "POPESTIMATE2012", "POPESTIMATE2013",  "POPESTIMATE2014", "POPESTIMATE2015", "POPESTIMATE2016", "POPESTIMATE2017", "POPESTIMATE2018", "POPESTIMATE2019" , "POPESTIMATE2020" )], id.vars=c('age_group','state2'))
 
-cos1 <- cos(2*pi*time/52.1775)
-cos2 <- cos(2*pi*time*2/52.1775)
-cos3 <- cos(2*pi*time*3/52.1775)
+pop2 <- reshape2::dcast(pop1.m, age_group + state2 + variable ~., fun.aggregate = sum)
+pop2$year <- as.numeric(gsub( 'POPESTIMATE','',as.character(pop2$variable)))
 
-dataset <- list('y' = ag3.c, 
-                'n.date'=dim(ag3.c)[3],
-                'n.age'=dim(ag3.c)[1],
-                "n.state"=dim(ag3.c)[2],
-                'sin1'=sin1,
-                'sin2'=sin2,
-                'sin3'=sin3,
-                'cos1'=cos1,
-                'cos2'=cos2,
-                'cos3'=cos3,
-                'time'=time
-                )
+names(pop2) <- c('age_group','state','variable','popsize')
 
-jags_post <- jags.model(textConnection(model_string_non_nested), data = dataset,
-                    n.chains = 3)
- update(jags_post, 
-         n.iter=75000)
-  rsv_resp <- coda.samples(jags_post, variable.names=c("rd2","lambda","rd1","phi", "rd0","epi","delta"),
-                      thin = 20,n.iter = 60000)
+pop2 <- pop2[,c('age_group','state','popsize')]
 
 ```
+
+## Multilevel model
 
 INLA
 ```{r}
@@ -410,49 +416,16 @@ ag3$all_cause_pre <- ag3$all_cause
 ag3$all_cause_pre[ag3$week_end >= '2020-03-01'] <- NA
 ag3$time_scale <- as.vector(scale(ag3$time))
 
-ag3.pre <- ag3[ag3$week_end < '2020-03-01',] %>%
-  group_by(state,age_group) %>%
-  summarize( log.ave.case = log(mean(all_cause)  ))
+# ag3.pre <- ag3[ag3$week_end < '2020-03-01',] %>%
+#   group_by(state,age_group) %>%
+#   summarize( log.ave.case = log(mean(all_cause)  ))
   
-ag3 <- merge( ag3, ag3.pre, by=c('state','age_group'))
-# mod.lme1 <- lme4::glmer(all_cause_pre ~ 1 + time_scale + sin1+sin2 +sin3 +cos1 +cos2 +cos3  + (1|age_group) + 
-#                           (1|state) + 
-#                           (0+sin1 +cos1|age_group) +
-#                           (0+sin1 +cos1|state) +
-#                           (0+sin2 +cos2|age_group) +
-#                           (0+sin2 +cos2|state) +   
-#                           (0+sin3 +cos3|age_group) +
-#                           (0+sin3 +cos3|state) +
-#                           (0+time_scale|age_group) +
-#                           (0+time_scale|state) 
-#                         ,   family='poisson', data=ag3)
-# 
-# mod.lme1 <- lme4::glmer(all_cause_pre ~ 1 + time_scale + sin1+sin2 +sin3 +cos1 +cos2 +cos3  + 
-#           (1 + sin1 +cos1 + sin2 +cos2 + sin3 +cos3 + time_scale||age_group) 
-#                        ,   family='poisson', data=ag3)
-```
+#ag3 <- merge( ag3, ag3.pre, by=c('state','age_group'))
 
-Simple GLM
-```{r}
-mod.glm1 <- glm(all_cause_pre ~ 
-                1 + time_scale + 
-                sin1 + sin2 + sin3 + cos1 +cos2+ cos3 
-                offset = log.ave.case,
-                family='poisson', data=ag3)
-summary(mod.glm1)
-```
+ag3 <- merge(ag3, pop2, by=c('state','age_group'))
 
-Simple INLA
-```{r}
-mod.inla1 <- inla(all_cause_pre ~ 
-                1 + time_scale + 
-                sin1 + sin2 + sin3 + cos1 +cos2+ cos3  ,
-                offset = log.ave.case,
-                family='poisson', data=ag3)
-summary(mod.inla1)
-```
+ag3$log_pop <- log(ag3$popsize)
 
-```{r}
 ag3$state_ag_combo <- as.factor(paste(ag3$state, ag3$age_group))
 ag3$state_ag_combo2 <- ag3$state_ag_combo
 ag3$state_ag_combo3 <- ag3$state_ag_combo
@@ -463,22 +436,49 @@ ag3$age_group3 <- ag3$age_group
 ag3$state2 <- ag3$state
 ag3$state3 <- ag3$state
 
-mod.inla2 <- inla(all_cause_pre ~ 
+```
+
+
+
+
+Simple GLM
+```{r}
+mod.glm1 <- glm(all_cause_pre ~ 
+                1 + time_scale + sin1 + sin2 + sin3 + cos1 +cos2+ cos3 +
+                  age_group + state + state_ag_combo +
+                  age_group*(time_scale + sin1 + sin2 + sin3 + cos1 +cos2+ cos3) +
+                  state*(time_scale + sin1 + sin2 + sin3 + cos1 +cos2+ cos3),#+
+                      #state*(time_scale+ sin1 + sin2 + sin3 + cos1 +cos2+ cos3) +
+                     # age_group*(time_scale + sin1 + sin2 + sin3 + cos1 +cos2+ cos3) ,
+                offset = log_pop,
+                family='poisson', data=ag3)
+summary(mod.glm1)
+```
+
+Simple INLA
+```{r}
+mod.inla1 <- inla(all_cause_pre ~ 
                 1 + time_scale + 
-                sin1 + sin2 + sin3 + cos1 +cos2+ cos3 +
-                 f(age_group, time_scale ,model='iid') +
-                 f(state, time_scale,model='iid') +
-                  f(state_ag_combo, time_scale,model='iid') +
-                  
-                f(age_group2, sin1 ,model='iid') +
-                 f(state2, sin1,model='iid') +
-                  f(state_ag_combo2, sin1,model='iid') +
-                  
-                  f(age_group3, cos1 ,model='iid') +
-                 f(state3, cos1,model='iid') +
-                  f(state_ag_combo3, cos1,model='iid') 
+                sin1 + sin2 + sin3 + cos1 +cos2+ cos3  + age_group +state ,
+                offset = log_pop,
+                family='poisson', data=ag3)
+summary(mod.inla1)
+```
+Runs in about 30 min
+```{r}
+
+mod.inla2 <- inla(all_cause_pre ~ 
+                1 + time_scale + sin1 + sin2 + sin3 + cos1 +cos2+ cos3 +
+                  age_group + state + state_ag_combo +
+                  age_group*(time_scale + sin1 + sin2 + sin3 + cos1 +cos2+ cos3) +
+                       state*(time_scale + sin1 + sin2 + sin3 + cos1 +cos2+ cos3) +
+                        
+                #Random slopes for the time trends and sin1, cos1 effects
+                f(state_ag_combo, time_scale,model='iid') +
+                f(state_ag_combo2, sin1,model='iid') +
+                f(state_ag_combo3, cos1,model='iid') 
                     ,
-                                offset = log.ave.case,
+                                offset = log_pop,
                 family='poisson', data=ag3,
                 control.compute=list(config = TRUE))
 summary(mod.inla2)
@@ -487,7 +487,7 @@ pred.sample.list <- inla.posterior.sample(n=500, mod.inla2, seed=123)
 
 post.labels<-dimnames(pred.sample.list[[1]]$latent)[[1]]
 
-posterior.samples<- sapply(pred.sample.list, '[[', 'latent')
+posterior.samples<- sapply(pred.sample.list, '[[', 'latent') #should be 'joint' instead of 'latent' https://www.ucl.ac.uk/population-health-sciences/sites/population-health-sciences/files/inla_baio.pdf
 
 preds.select<-grep('Predictor',post.labels )
 
@@ -500,6 +500,8 @@ ag3.preds <- cbind.data.frame(preds.summary,ag3)
 summary.list <- list( 'ag3.preds'=ag3.preds)
 
 saveRDS(summary.list,'./Data/INLA_results.rds')
+
+
 
 ```
 
