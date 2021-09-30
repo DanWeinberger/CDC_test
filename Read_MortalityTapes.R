@@ -7,6 +7,7 @@ library(tidyr)
 
 #the geographic resolution missing from the public data
 
+
 #https://www.cdc.gov/nchs/data_access/vitalstatsonline.htm
 file.names1<- list('VS14MORT.DUSMCPUB', 'VS15MORT.DUSMCPUB','VS16MORT.DUSMCPUB',
              'Mort2018US.PubUse.txt','VS19MORT.DUSMCPUB_r20210304')
