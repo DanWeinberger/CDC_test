@@ -513,15 +513,22 @@ summary.spl <- split(summary.list[[1]], paste(summary.list[[1]]$state, summary.l
 states <- sapply(summary.spl, function(x) unique(x$state))
 ages <- sapply(summary.spl, function(x) unique(x$age_group))
 
-summary.spl.85plus <- summary.spl[ages=='85 years and older']
 
-par(mfrow=c(6,3), mar=c(2,2,1,1))
-lapply(summary.spl.85plus, function(x){
-  plot(x$week_end, x$all_cause, type='l', bty='l', main=unique(x$state))
-  points(x$week_end, x$'50%', type='l', col='red', lty=2)
-  points(x$week_end, x$'50%', type='l', col='red', lty=2)
-  abline(v=as.Date('2020-03-01'), lty=2, col='gray')
-  })
+lapply(unique(ages), function(y){
+  summary.spl.age <- summary.spl[ages==y]
+  par(mfrow=c(6,3), mar=c(2,2,1,1))
+  lapply(summary.spl.age, function(x){
+    
+    age_state_lab <- paste(unique(x$age_group),unique(x$state), sep=' ')
+    
+    plot(x$week_end, x$all_cause, type='l', bty='l', main=age_state_lab)
+    points(x$week_end, x$'50%', type='l', col='red', lty=2)
+    points(x$week_end, x$'50%', type='l', col='red', lty=2)
+    abline(v=as.Date('2020-03-01'), lty=2, col='gray')
+    
+    })
+
+})
 
 ```
 
