@@ -5,6 +5,7 @@ library(pbapply)
 library(dplyr)
 library(reshape2)
 library(tidyr)
+library(ggplot2)
 
 #the geographic resolution missing from the public data
 
@@ -15,8 +16,8 @@ file.names1<- list('VS14MORT.DUSMCPUB', 'VS15MORT.DUSMCPUB','VS16MORT.DUSMCPUB',
 
 all.ds <- lapply(file.names1, function(x){
   d1 <- read_fwf(file=paste0("./CDC_tapes/" ,x),
-                 fwf_positions(start=c(20,21,65,69,102,445,70,71, 77,484,146,167,174,181,188,195,202,209,216,223,230,237,244,251,258,265,272,279,286,293,300),
-                               end=c(20,34,66,69,105,446,  70,73, 78,486,149, 171,178,185,192,199,206,213,220,227,234,241,248,255,262,269,276,283,290,297,304),
+                 fwf_positions(start=c(20,21,65,69,102,445,70,71, 79,484,146,167,174,181,188,195,202,209,216,223,230,237,244,251,258,265,272,279,286,293,300),
+                               end=c(20,34,66,69,105,446,  70,73, 80,486,149, 171,178,185,192,199,206,213,220,227,234,241,248,255,262,269,276,283,290,297,304),
                                col_names = c('res_status','state','month','sex','year','race','age_detail_class','age_detail_number','agec','hispanic', paste0('icd', 1:21 ) )),
                   guess_max=10000)
   return(d1)
@@ -44,21 +45,42 @@ df1$pneumo <- rowSums(df.pneumo) #how many RSV codes re there per row?
 df1$pneumo <- 1*(df1$pneumo>0) #convert to binary
 
 
-
-
-
-
-
-
 df1$infant <- 0
 df1$infant[df1$age_detail_class==1 & df1$age_detail_class==1] <-1
 df1$infant[df1$age_detail_class %in% c(4,5,6) ] <-1
 
 
-#Aggregate data
+#looks at seasonality by cause
+agg1.season <- df1 %>%
+  group_by(month, agec) %>%
+  summarize(N_deaths = n(), pneumo=sum(pneumo), rsv=sum(rsv)) %>%
+  ungroup()
+  
+agg1.season$month <- as.numeric(agg1.season$month)
+
+p1 <- ggplot(agg1.season, aes(x=month, y=pneumo, group=agec)) +
+  geom_line() +
+  ylab("Number of pneumococcal deaths") +
+  xlab("Date") +
+  theme_classic() +
+  theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
+  geom_hline(yintercept=0, col='gray', lty=2) +
+  facet_wrap(~ agec , scales='free') 
+p1
+
+p2 <- ggplot(agg1.season, aes(x=month, y=rsv, group=agec)) +
+  geom_line() +
+  ylab("Number of RSV deaths") +
+  xlab("Date") +
+  theme_classic() +
+  theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
+  geom_hline(yintercept=0, col='gray', lty=2) +
+  facet_wrap(~ agec , scales='free') 
+p2
+
+#Aggregate databy year, month, sex, age
 agg1 <- all.ds %>%
   bind_rows() %>% 
-  mutate(one=1) %>%
   group_by(month, year, sex, agec) %>%
   summarize(N_deaths = n())
 
