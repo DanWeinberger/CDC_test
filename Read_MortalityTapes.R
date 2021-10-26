@@ -14,9 +14,9 @@ file.names1<- list('VS14MORT.DUSMCPUB', 'VS15MORT.DUSMCPUB','VS16MORT.DUSMCPUB',
 
 all.ds <- lapply(file.names1, function(x){
   d1 <- read_fwf(file=paste0("./CDC_tapes/" ,x),
-                 fwf_positions(start=c(20,21,65,69,102,445,77,484,146),
-                               end=c(20,34,66,69,105,446,78,486,149),
-                               col_names = c('res_status','state','month','sex','year','race','agec','hispanic','icd1')),
+                 fwf_positions(start=c(20,21,65,69,102,445,70,71, 77,484,146),
+                               end=c(20,34,66,69,105,446,  70,73, 78,486,149),
+                               col_names = c('res_status','state','month','sex','year','race','age_detail_class','age_detail_number','agec','hispanic','icd1')),
                   guess_max=10000)
   return(d1)
 })
@@ -24,6 +24,16 @@ all.ds <- lapply(file.names1, function(x){
 df1 <- bind_rows(all.ds)
 saveRDS(df1, './CDC_tapes/compiled_data.rds')
 df1$one <-1
+
+#B97.4 not used
+# J12.1 is used
+df1$rsv <- 0
+df1$rsv[df1$icd1 %in% c('B974','J121', "J210", 'J205')] <- 1
+
+df1$infant <- 0
+df1$infant[df1$age_detail_class==1 & df1$age_detail_class==1] <-1
+df1$infant[df1$age_detail_class %in% c(4,5,6) ] <-1
+
 
 #Tidyverse version
 agg1 <- all.ds %>%

@@ -505,6 +505,7 @@ mod.inla2 <- inla(all_cause_pre ~
                         
                 #Random slopes for the time trends and sin1, cos1 effects
                 f(state_ag_combo, time_scale,model='iid') +
+                  
                 f(state_ag_combo2, sin1,model='iid') +
                 f(state_ag_combo3, cos1,model='iid') 
                     ,
