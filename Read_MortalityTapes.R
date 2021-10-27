@@ -25,6 +25,9 @@ all.ds <- lapply(file.names1, function(x){
 
 df1 <- bind_rows(all.ds)
 saveRDS(df1, './CDC_tapes/compiled_data.rds')
+
+df1 <- readRDS('./CDC_tapes/compiled_data.rds')
+
 df1$one <-1
 
 rsv.codes <- c('B974','J121', "J210", 'J205') #Define codes for RSV
@@ -49,16 +52,19 @@ df1$infant <- 0
 df1$infant[df1$age_detail_class==1 & df1$age_detail_class==1] <-1
 df1$infant[df1$age_detail_class %in% c(4,5,6) ] <-1
 
+#df1$date <- as.Date(paste(df1$year, df1$month, '01', sep='-'))
 
 #looks at seasonality by cause
 agg1.season <- df1 %>%
-  group_by(month, agec) %>%
+  group_by(year,month, agec) %>%
   summarize(N_deaths = n(), pneumo=sum(pneumo), rsv=sum(rsv)) %>%
   ungroup()
   
 agg1.season$month <- as.numeric(agg1.season$month)
 
-p1 <- ggplot(agg1.season, aes(x=month, y=pneumo, group=agec)) +
+
+
+p1 <- ggplot(agg1.season, aes(x=month, y=pneumo, group=year, col=year)) +
   geom_line() +
   ylab("Number of pneumococcal deaths") +
   xlab("Date") +
