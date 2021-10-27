@@ -11,20 +11,20 @@ library(ggplot2)
 
 
 #https://www.cdc.gov/nchs/data_access/vitalstatsonline.htm
-file.names1<- list('VS14MORT.DUSMCPUB', 'VS15MORT.DUSMCPUB','VS16MORT.DUSMCPUB','VS17MORT.DUSMCPUB',
-             'Mort2018US.PubUse.txt','VS19MORT.DUSMCPUB_r20210304')
-
-all.ds <- lapply(file.names1, function(x){
-  d1 <- read_fwf(file=paste0("./CDC_tapes/" ,x),
-                 fwf_positions(start=c(20,21,65,69,102,445,70,71, 79,484,146,167,174,181,188,195,202,209,216,223,230,237,244,251,258,265,272,279,286,293,300),
-                               end=c(20,34,66,69,105,446,  70,73, 80,486,149, 171,178,185,192,199,206,213,220,227,234,241,248,255,262,269,276,283,290,297,304),
-                               col_names = c('res_status','state','month','sex','year','race','age_detail_class','age_detail_number','agec','hispanic', paste0('icd', 1:21 ) )),
-                  guess_max=10000)
-  return(d1)
-})
-
-df1 <- bind_rows(all.ds)
-saveRDS(df1, './CDC_tapes/compiled_data.rds')
+# file.names1<- list('VS14MORT.DUSMCPUB', 'VS15MORT.DUSMCPUB','VS16MORT.DUSMCPUB','VS17MORT.DUSMCPUB',
+#              'Mort2018US.PubUse.txt','VS19MORT.DUSMCPUB_r20210304')
+# 
+# all.ds <- lapply(file.names1, function(x){
+#   d1 <- read_fwf(file=paste0("./CDC_tapes/" ,x),
+#                  fwf_positions(start=c(20,21,65,69,102,445,70,71, 79,484,146,167,174,181,188,195,202,209,216,223,230,237,244,251,258,265,272,279,286,293,300),
+#                                end=c(20,34,66,69,105,446,  70,73, 80,486,149, 171,178,185,192,199,206,213,220,227,234,241,248,255,262,269,276,283,290,297,304),
+#                                col_names = c('res_status','state','month','sex','year','race','age_detail_class','age_detail_number','agec','hispanic', paste0('icd', 1:21 ) )),
+#                   guess_max=10000)
+#   return(d1)
+# })
+# 
+# df1 <- bind_rows(all.ds)
+# saveRDS(df1, './CDC_tapes/compiled_data.rds')
 
 df1 <- readRDS('./CDC_tapes/compiled_data.rds')
 
