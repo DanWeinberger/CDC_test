@@ -34,11 +34,15 @@ rsv.codes <- c('B974','J121', "J210", 'J205') #Define codes for RSV
 
 pneumococcal.codes <- c('A403','J13','B953','G001')
 
+ld.codes <- c('A481')
+
 icd.cols <- grep('icd',names(df1)) #Define columns with multiple cause of death stats
 
 df.rsv <- pbapply(df1[,icd.cols],2, function(x) x %in% rsv.codes )
 
 df.pneumo <- pbapply(df1[,icd.cols],2, function(x) x %in% pneumococcal.codes )
+
+df.leg <- pbapply(df1[,icd.cols],2, function(x) x %in% ld.codes )
 
   
 df1$rsv <- rowSums(df.rsv) #how many RSV codes re there per row?
@@ -46,6 +50,9 @@ df1$rsv <- 1*(df1$rsv>0) #convert to binary
 
 df1$pneumo <- rowSums(df.pneumo) #how many RSV codes re there per row?
 df1$pneumo <- 1*(df1$pneumo>0) #convert to binary
+
+df1$ld <- rowSums(df.leg) #how many RSV codes re there per row?
+df1$ld <- 1*(df1$ld>0) #convert to binary
 
 
 df1$infant <- 0
@@ -57,7 +64,7 @@ df1$infant[df1$age_detail_class %in% c(4,5,6) ] <-1
 #looks at seasonality by cause
 agg1.season <- df1 %>%
   group_by(year,month, agec) %>%
-  summarize(N_deaths = n(), pneumo=sum(pneumo), rsv=sum(rsv)) %>%
+  summarize(N_deaths = n(), pneumo=sum(pneumo), rsv=sum(rsv), ld=sum(ld)) %>%
   ungroup()
   
 agg1.season$month <- as.numeric(agg1.season$month)
@@ -74,7 +81,7 @@ p1 <- ggplot(agg1.season, aes(x=month, y=pneumo, group=year, col=year)) +
   facet_wrap(~ agec , scales='free') 
 p1
 
-p2 <- ggplot(agg1.season, aes(x=month, y=rsv, group=agec)) +
+p2 <- ggplot(agg1.season, aes(x=month, y=rsv, group=year, col=year)) +
   geom_line() +
   ylab("Number of RSV deaths") +
   xlab("Date") +
@@ -83,6 +90,17 @@ p2 <- ggplot(agg1.season, aes(x=month, y=rsv, group=agec)) +
   geom_hline(yintercept=0, col='gray', lty=2) +
   facet_wrap(~ agec , scales='free') 
 p2
+
+
+p3 <- ggplot(agg1.season, aes(x=month, y=ld, group=year, col=year)) +
+  geom_line() +
+  ylab("Number of LD deaths") +
+  xlab("Date") +
+  theme_classic() +
+  theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
+  geom_hline(yintercept=0, col='gray', lty=2) +
+  facet_wrap(~ agec , scales='free') 
+p3
 
 #Aggregate databy year, month, sex, age
 agg1 <- all.ds %>%
