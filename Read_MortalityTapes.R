@@ -59,6 +59,7 @@ df1$infant <- 0
 df1$infant[df1$age_detail_class==1 & df1$age_detail_class==1] <-1
 df1$infant[df1$age_detail_class %in% c(4,5,6) ] <-1
 
+df1$agey <- as.numeric(df1$age_detail_number)
 #df1$date <- as.Date(paste(df1$year, df1$month, '01', sep='-'))
 
 #looks at seasonality by cause
@@ -102,6 +103,23 @@ p3 <- ggplot(agg1.season, aes(x=month, y=ld, group=year, col=year)) +
   facet_wrap(~ agec , scales='free') 
 p3
 
+agg1.season.allyr <- df1 %>%
+  group_by(agec,month) %>%
+  summarize(N_deaths = n(), pneumo=sum(pneumo), rsv=sum(rsv), ld=sum(ld)) %>%
+  ungroup()
+
+agg1.season.allyr$month <- as.numeric(agg1.season.allyr$month)
+
+p4 <- ggplot(agg1.season.allyr, aes(x=month, y=ld, group=agec)) +
+  geom_line() +
+  ylab("Number of LD deaths") +
+  xlab("Date") +
+  theme_classic() +
+  geom_hline(yintercept=0, col='gray', lty=2) +
+  theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
+  facet_wrap(~ agec , scales='free') 
+p4
+
 #Aggregate databy year, month, sex, age
 agg1 <- all.ds %>%
   bind_rows() %>% 
@@ -112,6 +130,11 @@ agg1$date <-    as.Date(paste(agg1$year, agg1$month,'01',sep='-'))
 
 agg1 <- agg1[order(agg1$agec, agg1$sex, agg1$date),] 
 
+
+
+ave.age.ldf <-  df1[df1$ld==1,] %>%
+  group_by(month) %>%
+  summarize(ave.age  = mean(agey) )
 
 # Agec
 # 01 ... Under 1 year (includes not stated infant ages)
