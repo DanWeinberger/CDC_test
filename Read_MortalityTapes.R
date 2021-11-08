@@ -28,6 +28,40 @@ library(ggplot2)
 
 df1 <- readRDS('./CDC_tapes/compiled_data.rds')
 
+df1$hisp_recode <- 999
+df1$hisp_recode[df1$hispanic<=199 & df1$hispanic>=100] <- 0
+df1$hisp_recode[df1$hispanic >=200 & df1$hispanic <= 299] <- 1
+#table(df1$hisp_recode)
+
+# df1$race_ethnicity <- 999
+# df1$race_ethnicity[df1$race %in% c('01') & df1$hisp_recode != 1] <- 1 #white, non-Hospanic
+# df1$race_ethnicity[df1$race %in% c('02') & df1$hisp_recode != 1]  <- 2 #black, non-Hispanic
+# df1$race_ethnicity[ df1$hisp_recode == 1]  <- 3 #Hispanic
+# df1$race_ethnicity[ df1$race %in% c('04','05','18','28','48' , '06','07','38','58','68','78') & df1$hisp_recode != 1]  <- 4 #Asian
+# df1$race_ethnicity[ df1$race %in% c('03') & df1$hisp_recode != 1]  <- 5 #American Indian
+# #table(df1$race_ethnicity)
+
+df1$race_recode <- 999
+df1$race_recode[df1$race %in% c('01') ] <- 1 #white, non-Hospanic
+df1$race_recode[df1$race %in% c('02') ]  <- 2 #black, non-Hispanic
+df1$race_recode[ df1$race %in% c('03') ]  <- 3 #American Indian
+df1$race_recode[ df1$race %in% c('04','05','18','28','48' ,'68','78')]  <- 4 #Asian
+df1$race_recode[ df1$race %in% c( '06','07','38','58')]  <- 5 #Hawaain/Pac Is
+
+#table(df1$race_ethnicity)
+  
+#Create aggregate time series for analysis
+agg1 <- df1 %>%
+  bind_rows() %>% 
+  group_by(month, year, sex, agec,race_recode) %>%
+  summarize(N_deaths = n())  %>%
+  ungroup  %>%
+  complete(month, year, sex, agec,race_recode, fill=list(N_deaths=0)) #fills 0s
+
+saveRDS(agg1,'./Data/Confidential/compiled_sex_age_race.rds')
+
+
+## Cause specific deaths
 df1$one <-1
 
 rsv.codes <- c('B974','J121', "J210", 'J205') #Define codes for RSV
@@ -61,6 +95,8 @@ df1$infant[df1$age_detail_class %in% c(4,5,6) ] <-1
 
 df1$agey <- as.numeric(df1$age_detail_number)
 #df1$date <- as.Date(paste(df1$year, df1$month, '01', sep='-'))
+
+
 
 #looks at seasonality by cause
 agg1.season <- df1 %>%

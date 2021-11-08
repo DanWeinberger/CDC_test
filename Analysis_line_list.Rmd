@@ -1,0 +1,346 @@
+---
+title: "Excess death in the US by age"
+author: "Dan Weinberger"
+date: "10/29/2020"
+output:
+  html_document:
+    df_print: paged
+    html_document: null
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+  word_document:
+    toc: yes
+    toc_depth: '2'
+  pdf_document: 
+    keep_tex:  true
+params:
+  agg.level: 'state'
+  n.days.filter: 20
+  web.version: FALSE
+  extrap.date: '2020-01-26'
+  count.start.date: '2020-03-01'
+  end.data.date: '2020-09-05'
+---
+
+```{r, include = F}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  echo=F,
+  warning=FALSE, 
+  message=FALSE,
+  comment = "#>",
+  dev=c('png','pdf'),
+  fig.path='./figures/',
+  gganimate = list(
+    nframes = 50)
+)
+
+extrap.date <-  as.Date(params$extrap.date)
+count.start.date <- as.Date(params$count.start.date)
+end.data.date <- as.Date(params$end.data.date)
+
+state.name2 <- c(state.name, 'District of Columbia','Puerto Rico', 'United States', 'New York City')
+state.abb2 <- c(state.abb, 'DC','PR','US','NYC')
+
+
+last.date.format <- 
+  format(end.data.date, '%b %d, %Y')
+```
+
+```{r setup}
+library(ExcessILI)
+library(readxl)
+library(cdcfluview)
+library(reshape2)
+library(ggplot2)
+library(lubridate)
+library(RColorBrewer)
+library(plotly)
+library(MMWRweek)
+library(readr)
+library(rjson)
+library(htmlTable)
+library(RSocrata)
+library(pdftools)
+library(readr)
+library(abind)
+library(gsubfn)
+library(dplyr)
+library(RCurl)
+library(tidyverse)
+library(gifski)
+library(gganimate)
+library(shiny)
+library(rjags)
+library(INLA)
+library(lme4)
+#library(jsonlite)
+set.seed(123)
+
+```
+
+
+```{r}
+ag3 <- readRDS('./Data/Confidential/compiled_sex_age_race.rds')
+```
+
+## Population size data
+https://www.census.gov/programs-surveys/popest/technical-documentation/research/evaluation-estimates/2020-evaluation-estimates/2010s-state-detail.html
+Race:
+1 = White Alone
+2 = Black or African American Alone
+3 = American Indian or Alaska Native Alone
+4 = Asian Alone
+5 = Native Hawaiian and Other Pacific Islander Alone
+6 = Two or more races
+
+Sex: 
+0 = Total
+1 = Male
+2 = Female
+
+The key for ORIGIN is as follows:
+0 = Total
+1 = Not Hispanic
+2 = Hispanic
+
+
+ 01 ... Under 1 year (includes not stated infant ages)
+ 02 ... 1 - 4 years
+# 03 ... 5 - 14 years
+# 04 ... 15 - 24 years
+# 05 ... 25 - 34 years
+# 06 ... 35 - 44 years
+# 07 ... 45 - 54 years
+# 08 ... 55 - 64 years
+# 09 ... 65 - 74 years
+# 10 ... 75 - 84 years
+# 11 ... 85 years and over
+# 12 ... Age not stated
+```{r}
+pop1 <- read.csv('./Data/SC-EST2020-alldata6.csv')
+
+pop1$agec <- NA
+pop1$agec[pop1$AGE>=0 & pop1$AGE<1] <- '01'
+pop1$agec[pop1$AGE>=1 & pop1$AGE<5] <- '02'
+pop1$agec[pop1$AGE>=5 & pop1$AGE<15] <- '03'
+pop1$agec[pop1$AGE>=15 & pop1$AGE<25] <- '04'
+pop1$agec[pop1$AGE>=25 & pop1$AGE<35] <- '05'
+pop1$agec[pop1$AGE>=35 & pop1$AGE<45] <- '06' #category 85=85+; cat 999 is all combined
+pop1$agec[pop1$AGE>=45 & pop1$AGE<55] <- '07' #category 85=85+; cat 999 is all combined
+pop1$agec[pop1$AGE>=55 & pop1$AGE<65] <- '08' #category 85=85+; cat 999 is all combined
+pop1$agec[pop1$AGE>=65 & pop1$AGE<75] <- '09' #category 85=85+; cat 999 is all combined
+pop1$agec[pop1$AGE>=75 & pop1$AGE<85] <- '10' #category 85=85+; cat 999 is all combined
+pop1$agec[pop1$AGE>=85 & pop1$AGE<110] <- '11' #category 85=85+; cat 999 is all combined
+
+pop1$sex2 <- NA
+pop1$sex2[pop1$SEX==1] <- 'M'
+pop1$sex2[pop1$SEX==2]  <- 'F'
+pop1$sex2[pop1$SEX==0]  <- 'ALL'
+
+
+
+#pop1$state2 <- state.abb[match(pop1$NAME,state.name)]
+#pop1$state2[pop1$NAME=='District of Columbia'] <- 'DC'
+
+pop1.m <- reshape2::melt(pop1[ pop1$ORIGIN==0 ,c('agec','RACE','sex2',"POPESTIMATE2010", "POPESTIMATE2011", "POPESTIMATE2012", "POPESTIMATE2013",  "POPESTIMATE2014", "POPESTIMATE2015", "POPESTIMATE2016", "POPESTIMATE2017", "POPESTIMATE2018", "POPESTIMATE2019" , "POPESTIMATE2020" )], id.vars=c('agec','sex2', 'RACE'))
+
+pop2 <- reshape2::dcast(pop1.m, agec + sex2 +RACE + variable ~., fun.aggregate = sum)
+
+pop2$year <- as.numeric(gsub( 'POPESTIMATE','',as.character(pop2$variable)))
+
+names(pop2) <- c('agec','SEX','RACE','variable','popsize','year')
+
+pop2 <- pop2[,c('agec','SEX','RACE','popsize','year')]
+
+pop2$month <- 7 #July 1
+
+#pop2 <- pop2[pop2$state !='US',]
+
+#This is a hacky fix because we only have pop estimates up until July 2020; assume it is constant until july 2021 for now
+# fill_2021 <- pop2[pop2$year==2020,]
+# fill_2021$year <- 2021
+# 
+# pop2 <- bind_rows(pop2, fill_2021)
+
+empty_ts <- readRDS('./Data/Confidential/compiled_sex_age_race.rds')
+empty_ts <- empty_ts[,c('agec','sex','race_recode','year','month')]
+names(empty_ts) <- c('agec','sex','race','year','month')
+  
+names(pop2) <- tolower(names(pop2))
+
+pop2 <- pop2[!is.na(pop2$agec),]
+pop2 <- pop2[pop2$sex !='ALL',]
+
+
+empty_ts <- empty_ts[empty_ts$agec !='12',]
+
+
+empty_ts$month <- as.numeric(empty_ts$month)
+
+empty_ts2 <- merge(empty_ts, pop2, by=c('agec','sex','race','year','month'), all=T)
+
+empty_ts2$date <- as.Date(paste(empty_ts2$year, empty_ts2$month, '01', sep='-'), '%Y-%m-%d')
+
+empty_ts2 <- empty_ts2[empty_ts2$date>='2014-07-01' ,] #UPDATE THIS!
+
+empty_ts2 <- empty_ts2[empty_ts2$race !=6,]
+
+
+
+filled_pop2 <- empty_ts2 %>%
+      group_by(agec , sex,race) %>%
+      arrange(agec , sex,race,year, month) %>%
+          mutate(time=seq(1,n())) %>%
+           mutate(pop.interpol=approx(time,popsize,time)$y)
+
+
+filled_pop2 <- filled_pop2[,c('agec','sex','race','date','pop.interpol')]
+
+# test1 <- filled_pop2[filled_pop2$state=='NY' & filled_pop2$age_group=="75-84 years",]
+# plot(test1$week_end, test1$pop.interpol)
+```
+
+## Set up data for multilevel model
+
+```{r}
+
+ag3 <- readRDS('./Data/cleaned_file.rds')
+
+ag3 <- ag3[ag3$state!='US',]
+
+ag3$time <- 1:length(unique(ag3$week_end))
+ag3$sin1 <- sin(2*pi*ag3$time/52.1775)
+ag3$sin2 <- sin(2*pi*ag3$time*2/52.1775)
+ag3$sin3 <- sin(2*pi*ag3$time*3/52.1775)
+
+ag3$cos1 <- cos(2*pi*ag3$time/52.1775)
+ag3$cos2 <- cos(2*pi*ag3$time*2/52.1775)
+ag3$cos3 <- cos(2*pi*ag3$time*3/52.1775)
+ 
+ag3$age_group <- as.factor(ag3$age_group)
+ag3$state <- as.factor(ag3$state)
+
+#mod.inla <- inla(all_cause ~  , family='poisson')
+
+ag3$all_cause_pre <- ag3$all_cause
+
+ag3$all_cause_pre[ag3$week_end >= '2020-03-01'] <- NA
+ag3$time_scale <- as.vector(scale(ag3$time))
+
+# ag3.pre <- ag3[ag3$week_end < '2020-03-01',] %>%
+#   group_by(state,age_group) %>%
+#   summarize( log.ave.case = log(mean(all_cause)  ))
+  
+#ag3 <- merge( ag3, ag3.pre, by=c('state','age_group'))
+
+ag3$year <- year(ag3$week_end)
+ag3$weekN <- week(ag3$week_end)
+
+
+ag3 <- merge(ag3, filled_pop2, by=c('state','age_group', 'week_end'), all.x=T)
+
+
+ag3$log_pop <- log(ag3$pop.interpol)
+
+ag3$state_ag_combo <- as.factor(paste(ag3$state, ag3$age_group))
+ag3$state_ag_combo2 <- ag3$state_ag_combo
+ag3$state_ag_combo3 <- ag3$state_ag_combo
+
+ag3$age_group2 <- ag3$age_group
+ag3$age_group3 <- ag3$age_group
+
+ag3$state2 <- ag3$state
+ag3$state3 <- ag3$state
+
+ag3 <- ag3[!is.na(ag3$pop.interpol),]
+#ag3 <- ag3[ag3$year<=2020,]
+```
+
+## Multilevel model
+
+Simple GLM
+```{r}
+mod.glm1 <- glm(all_cause_pre ~ 
+                1 + time_scale + sin1 + sin2 + sin3 + cos1 +cos2+ cos3 +
+                  age_group + state + state_ag_combo +
+                  age_group*(time_scale + sin1 + sin2 + sin3 + cos1 +cos2+ cos3) +
+                  state*(time_scale + sin1 + sin2 + sin3 + cos1 +cos2+ cos3),#+
+                      #state*(time_scale+ sin1 + sin2 + sin3 + cos1 +cos2+ cos3) +
+                     # age_group*(time_scale + sin1 + sin2 + sin3 + cos1 +cos2+ cos3) ,
+                offset = log_pop,
+                family='poisson', data=ag3)
+summary(mod.glm1)
+```
+
+
+Model fit takes about 1 min
+```{r}
+
+mod.inla2 <- inla(all_cause_pre ~ 
+                1 + time_scale + sin1 + sin2 + sin3 + cos1 +cos2+ cos3 +
+                  age_group + state + state_ag_combo +
+                  age_group*(time_scale + sin1 + sin2 + sin3 + cos1 +cos2+ cos3) +
+                       state*(time_scale + sin1 + sin2 + sin3 + cos1 +cos2+ cos3) +
+                        
+                #Random slopes for the time trends and sin1, cos1 effects
+                f(state_ag_combo, time_scale,model='iid') +
+                  
+                f(state_ag_combo2, sin1,model='iid') +
+                f(state_ag_combo3, cos1,model='iid') 
+                    ,
+                                offset = log_pop,
+                family='poisson', data=ag3,
+                control.compute=list(config = TRUE))
+summary(mod.inla2)
+
+pred.sample.list <- inla.posterior.sample(n=500, mod.inla2, seed=123)
+
+post.labels<-dimnames(pred.sample.list[[1]]$latent)[[1]]
+
+posterior.samples<- sapply(pred.sample.list, '[[', 'latent') #should be 'joint' instead of 'latent' https://www.ucl.ac.uk/population-health-sciences/sites/population-health-sciences/files/inla_baio.pdf
+
+preds.select<-grep('Predictor',post.labels )
+
+posterior.preds<-exp(posterior.samples[preds.select,]) #lambda
+
+preds.summary <- t(apply(posterior.preds,1, quantile, probs=c(0.025,0.5,0.975)))
+
+ag3.preds <- cbind.data.frame(preds.summary,ag3)
+
+summary.list <- list( 'ag3.preds'=ag3.preds)
+
+saveRDS(summary.list,'./Data/INLA_results.rds')
+
+
+
+```
+
+```{r, fig.width=8, fig.height=12}
+summary.list <- readRDS('./Data/INLA_results.rds')
+
+summary.spl <- split(summary.list[[1]], paste(summary.list[[1]]$state, summary.list[[1]]$age_group ))
+
+states <- sapply(summary.spl, function(x) unique(x$state))
+ages <- sapply(summary.spl, function(x) unique(x$age_group))
+
+
+lapply(unique(ages), function(y){
+  summary.spl.age <- summary.spl[ages==y]
+  par(mfrow=c(6,3), mar=c(2,2,1,1))
+  lapply(summary.spl.age, function(x){
+    age_state_lab <- paste(unique(x$age_group),unique(x$state), sep=' ')
+    
+    plot(x$week_end, x$all_cause, type='l', bty='l', main=age_state_lab)
+    points(x$week_end, x$'50%', type='l', col='red', lty=2)
+    points(x$week_end, x$'50%', type='l', col='red', lty=2)
+    abline(v=as.Date('2020-03-01'), lty=2, col='gray')
+    
+    })
+
+})
+
+```
+
+
