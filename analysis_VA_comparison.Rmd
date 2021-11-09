@@ -1,0 +1,615 @@
+---
+title: "Excess death in the US by age"
+author: "Dan Weinberger"
+date: "10/29/2020"
+output:
+  html_document:
+    df_print: paged
+    html_document: null
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+  word_document:
+    toc: yes
+    toc_depth: '2'
+  pdf_document: 
+    keep_tex:  true
+params:
+  agg.level: 'state'
+  n.days.filter: 20
+  web.version: FALSE
+  extrap.date: '2020-01-26'
+  count.start.date: '2020-03-01'
+  end.data.date: '2020-09-05'
+---
+
+```{r, include = F}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  echo=F,
+  warning=FALSE, 
+  message=FALSE,
+  comment = "#>",
+  dev=c('png','pdf'),
+  fig.path='./figures/',
+  gganimate = list(
+    nframes = 50)
+)
+
+extrap.date <-  as.Date(params$extrap.date)
+count.start.date <- as.Date(params$count.start.date)
+end.data.date <- as.Date(params$end.data.date)
+
+state.name2 <- c(state.name, 'District of Columbia','Puerto Rico', 'United States', 'New York City')
+state.abb2 <- c(state.abb, 'DC','PR','US','NYC')
+
+
+last.date.format <- 
+  format(end.data.date, '%b %d, %Y')
+```
+
+```{r setup}
+library(ExcessILI)
+library(readxl)
+library(cdcfluview)
+library(reshape2)
+library(ggplot2)
+library(lubridate)
+library(RColorBrewer)
+library(plotly)
+library(MMWRweek)
+library(readr)
+library(rjson)
+library(htmlTable)
+library(RSocrata)
+library(pdftools)
+library(readr)
+library(abind)
+library(gsubfn)
+library(dplyr)
+library(RCurl)
+library(tidyverse)
+library(gifski)
+library(gganimate)
+library(shiny)
+library(rjags)
+library(INLA)
+library(lme4)
+#library(jsonlite)
+set.seed(123)
+
+```
+
+```{r archivfunc}
+# Using ExcessILI's data archiving functions, returns the most recent copy of
+# output obtained by running a function or formula \code{f}, unless this 
+# copy doesn't exist or is older (by modification time) than \code{maxage}.
+# In that case, \code{f} is run and the output is archived into the folder
+# Data/'storeName' as an RDS file, using the function ExcessILI::storeRDS.
+#
+# @param storeName A string. The name of the folder to store output in
+# @param f A function or formula taking no arguments. Formulas are coerced to
+#   functions.
+# @param maxage How old can any existing archived file be before \code{f} is 
+#   called again?
+runIfExpired <- function(storeName, f, maxage=hours(99999999999999)) {
+  basepath <- "Data/"
+  mostRecent <- mostRecentTimestamp(storeName, basepath=basepath)
+  f <- rlang::as_function(f)
+  
+  runAndArchive <- function() {
+    data <- f()
+    storeRDS(data, storeName, basepath)
+    data
+  }
+    
+  if (is.na(mostRecent)) 
+    return(runAndArchive())
+
+  if (mostRecent %--% now() < maxage)
+    return(retrieveRDS(storeName, basepath))
+
+  runAndArchive()
+}
+```
+
+```{r, eval=F}
+if (!require("devtools")) {
+  install.packages("devtools")
+}
+devtools::install_github("weinbergerlab/ExcessILI")
+#Test12343
+```
+
+## Download and archive the latest version of the data from NCHS
+set maxage to a small number (e.g. 24, for 24 hours) if you want to to download a recent copy of the data; otherwise it will use the most recent copy on disk in the Data/nchs_age_state folder
+```{r}
+nchs.age.state <- runIfExpired('nchs_age_state', maxage=999,
+ ~read.csv("https://data.cdc.gov/api/views/y5bj-9g5w/rows.csv?accessType=DOWNLOAD") 
+ )
+
+```
+
+```{r}
+age1 <- nchs.age.state
+age1 <- age1[ age1$Type=='Unweighted' & age1$Suppress =='',]
+age1 <- age1[,c('Week.Ending.Date', 'Age.Group','Number.of.Deaths', 'State.Abbreviation' )]
+age1$Week.Ending.Date <- as.Date(age1$Week.Ending.Date, '%m/%d/%Y')
+
+
+#Cut off last 2 months of data--incomplete reporting
+max.date <- max(age1$Week.Ending.Date)
+age1 <- age1[age1$Week.Ending.Date<= (max.date-60),]
+
+names(age1) <-c('week_end','age_group','all_cause','state')
+age1$one <-1
+
+#age1$age_group[age1$age_group=="Under 25 years"] <- '0-25 years'
+
+
+
+age1.us <- age1[age1$state=='US' & age1$age_group %in% c('25-44 years' ,'45-64 years','65-74 years','75-84 years' ,  '85 years and older'),c('week_end','age_group', 'all_cause')]
+
+age1.us$source <- 'NCHS'
+
+
+```
+
+
+VA data
+```{r}
+v1 <- read.csv('./Data/Confidential/va_aggdata_all.csv')
+v1$source <- 'VA'
+v1 <- v1[v1$Age.Group %in% c('25-44 years' ,'45-64 years','65-74 years','75-84 years' ,  '85 years and older'),]
+v1 <- v1[,c('Week.Ending.Date', 'Age.Group','Number.of.Deaths', 'source')]
+names(v1) <- c('week_end','age_group', 'all_cause', 'source')
+
+v1$week_end <- as.Date(v1$week_end)
+
+v1$all_cause <- as.numeric(as.character(v1$all_cause))
+
+v1$all_cause[is.na(v1$all_cause)] <- 5
+
+#some values split across multiple rows around Jan 1
+v2 <- v1 %>%
+  group_by(week_end,age_group,source) %>%
+  summarize(all_cause = sum(all_cause))
+
+```
+
+Combine
+```{r}
+
+c1 <- bind_rows( v2 ,age1.us)
+
+c1$one <- 1
+
+max.start <- max(min(v2$week_end) , min(age1.us$week_end))
+min.end <- min(max(v2$week_end) , max(age1.us$week_end))
+
+c1 <- c1[c1$week_end>=max.start & c1$week_end<=min.end,]
+
+c1 <- c1[order(c1$source, c1$age_group, c1$week_end),]
+
+c1 <- c1[c1$week_end <= '2021-01-01',]
+```
+
+
+
+```{r}
+p1 <- ggplot(c1[c1$source=='NCHS',], aes(x=week_end, y=all_cause)) +
+      geom_line() +
+      ylab("Number of all-cause deaths") +
+      xlab("Date") +
+      theme_classic() +
+      theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
+      geom_hline(yintercept=0, col='gray', lty=2) +
+        facet_wrap(~age_group , scales='free') +
+        theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) 
+p1
+
+p2 <- ggplot(c1[c1$source=='VA',], aes(x=week_end, y=all_cause)) +
+      geom_line() +
+      ylab("Number of all-cause deaths") +
+      xlab("Date") +
+      theme_classic() +
+      theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
+      geom_hline(yintercept=0, col='gray', lty=2) +
+        facet_wrap(~age_group , scales='free') +
+        theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) 
+p2
+```
+
+
+## run the model
+```{r}
+
+mod1 <- excessCases(c1[c1$source=='VA',], 
+             statevar = "source",
+             agevar='age_group',
+             datevar = "week_end", 
+             use.syndromes = c("all_cause"),
+            extrapolation.date = as.Date("2020-03-01"), 
+            sum.dates = as.Date("2020-03-01"),
+            denom.var = "one",
+            extend.epiyear =TRUE,
+            time.res='week',
+            model.type='poisson') 
+
+#saveRDS(mod1,'results1.rds')
+
+```
+
+## Interactive dashboard plot
+```{r}
+
+
+app1 <-dashboardPlot(mod1)
+print(app1)
+```
+
+## Heatmap type dashboard
+```{r}
+source('app.R')
+shiny::shinyApp(ui, server)
+
+```
+
+
+```{r}
+ excess_output=mod1
+ statevar = "state"
+ agevar='age_group'
+ datevar = "date"
+ outcome='all_cause'
+ yaxis=statevar
+ facet=agevar
+  library(dplyr)
+    df_y <- excess_output %>% pluck(outcome) %>% map(~(transpose(.x) %>% 
+        map(~(.x %>% bind_rows())) %>% .[c(datevar, "y")] %>% 
+        map(~(.x %>% gather(statevar, y))) %>% bind_cols() %>% 
+        set_names(c(statevar, datevar, "rm", "y")) %>% 
+        dplyr::select(-rm))) %>% bind_rows(.id = agevar)
+    
+    df_pred <- excess_output %>% pluck(outcome) %>% map(~(transpose(.x) %>% 
+        map(~(.x %>% bind_rows())) %>% .[c(datevar, "pred")] %>% 
+        map(~(.x %>% gather(statevar, pred))) %>% bind_cols() %>% 
+        set_names(c(statevar, datevar, "rm", "pred")) %>% 
+        dplyr::select(-rm))) %>% bind_rows(.id = agevar)
+    df_oe <- df_y %>% left_join(df_pred, by = c(agevar, statevar, 
+        datevar)) %>% mutate(oe = y/pred, year = year(get(datevar)), 
+        week = week(get(datevar)), oe_fac = cut(oe, breaks = c(-Inf, 
+            0.5, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 3.5, 4, 6, 8, 
+            10, Inf), labels = c("0.5", "1.0", "1.25", 
+            "1.5", "1.75", "2.0", "2.5", 
+            "3.0", "3.5", "4.0", "6.0", 
+            "8.0", "10.0", ">10.0")), oe_fac_rev = factor(oe_fac, 
+            levels = rev(levels(oe_fac))))
+    dates <- as.Date(unique(df_oe[[datevar]]))
+    states <- unique(df_oe[[statevar]])
+    age_groups <- unique(df_oe[[agevar]])
+    last.date <- max(dates)
+    last.date.format <- format(last.date, "%b %d, %Y")
+
+    ui <- fluidPage(shiny::titlePanel(paste0("Data through ", 
+        last.date.format)), shiny::sidebarLayout(shiny::sidebarPanel(shiny::selectInput(input = "set.states", 
+        label = "State:", choice = states, selected = c("NY"), 
+        multiple = T), shiny::selectInput(input = "set.ages", 
+        label = "Age group:", choice = age_groups, selected = c("18 and under", 
+            "19-64", "65 and over"), multiple = T), 
+        shiny::sliderInput(input = "display.dates", label = "Earliest date to display", 
+            min = min(dates), max = dates[length(dates) - 2], 
+            step = 7, value = dates[length(dates) - round(length(dates)/5)])), 
+        shiny::mainPanel(shiny::plotOutput("plot"))))
+    server <- function(input, output) {
+        library(ggplot2)
+        dates_states_ages_sel <- reactive({
+            req(input$display.dates, input$set.states, input$set.ages)
+            df_oe %>% filter(get(datevar) >= input$display.dates & 
+                get(statevar) %in% c(input$set.states) & get(agevar) %in% 
+                c(input$set.ages))
+        })
+        output$plot = renderPlot({
+            ggplot(data = dates_states_ages_sel(), aes(x = factor(get(datevar)), 
+                y = get(yaxis))) + geom_raster(aes(fill = oe_fac_rev), 
+                interpolate = F) + scale_fill_manual(values = c(`>10.0` = "#5c0900", 
+                `10.0` = "#850d00", `8.0` = "#a31000", 
+                `6.0` = "#c21300", `4.0` = "#eb1800", 
+                `3.5` = "#ff3e29", `3.0` = "#ff7014", 
+                `2.5` = "#ff9049", `2.0` = "#ffaf35", 
+                `1.75` = "#ffd230", `1.5` = "#a3a3cc", 
+                `1.25` = "#b7b7d7", `1.0` = "#cacae2", 
+                `0.5` = "#dbdbeb")) + xlab("Time") + 
+                labs(fill = "O/E Ratio") + scale_x_discrete(expand = c(0, 
+                0)) + scale_y_discrete(expand = c(0, 0)) + facet_grid(get(facet) ~ 
+                .) + theme_bw() + theme(axis.title.y = element_blank(), 
+                axis.text.x = element_text(size = 7, vjust = 1, 
+                  hjust = 0, angle = 90))
+        })
+    }
+    shiny::shinyApp(ui, server)
+
+```
+
+
+
+
+Extract output as arrays
+ Can use this to calculate all sorts of custom things, like excess aggregated over different time periods. Some of the outputs contain draws from a Monte Carlo simulation, which can be used for propagating errors. For example, below we have sum.obs.ac gives the total deaths during the evaluation periods, and sum.pred.iter gives 10,000 values of the sum predicted value. These could be combined across strata
+```{r}
+ds <- mod1
+dates1 <-
+  ds[[1]][[1]][[1]]$date
+  
+sum.obs.ac <-
+    excessExtract(ds = ds,
+                syndrome = 'all_cause',
+                extract.quantity = "sum.obs")
+
+sum.pred.iter <-
+    excessExtract(ds = ds,
+                syndrome = 'all_cause',
+                extract.quantity = "sum.pred.iter")
+
+```
+
+## Sum across age groups, by state
+Print the 95% CIs for the RR (overall observed/expected deaths by state)
+```{r}
+
+pred.state.iter <- apply(sum.pred.iter,c(1,2), sum)
+
+sum.obs.ac.state <- apply(sum.obs.ac, c(2), sum)
+
+RR.state <- apply(pred.state.iter,1, function(x) sum.obs.ac.state/x)
+RR.state.q <- round(t(apply(RR.state,1,quantile, probs=c(0.025,0.5,0.975))),2)
+RR.state.q
+
+```
+
+
+
+```{r}
+excess_output = mod1
+            statevar = "state"
+             agevar='age_group'
+             datevar = "date" 
+             outcome='all_cause' 
+             yaxis=statevar
+             facet=agevar
+
+
+  df_y <- 
+    excess_output  %>% 
+    pluck(outcome) %>% 
+    map(~(
+      transpose(.x) %>% 
+        map(~(.x %>% bind_rows())) %>% .[c(datevar, "y")] %>% 
+        map(~(.x %>% gather(statevar, y))) %>% 
+        bind_cols()  %>% 
+        set_names(c(statevar, datevar, "rm", "y")) %>% 
+        dplyr::select(-rm)
+    )) %>% 
+    bind_rows(.id = agevar) 
+  
+  
+```
+
+
+## Population size data
+https://www.census.gov/programs-surveys/popest/technical-documentation/research/evaluation-estimates/2020-evaluation-estimates/2010s-state-detail.html
+Race:
+1 = White Alone
+2 = Black or African American Alone
+3 = American Indian or Alaska Native Alone
+4 = Asian Alone
+5 = Native Hawaiian and Other Pacific Islander Alone
+6 = Two or more races
+
+Sex: 
+0 = Total
+1 = Male
+2 = Female
+
+The key for ORIGIN is as follows:
+0 = Total
+1 = Not Hispanic
+2 = Hispanic
+```{r}
+pop1 <- read.csv('./Data/SC-EST2020-alldata6.csv')
+
+pop1$age_group <- NA
+pop1$age_group[pop1$AGE>=0 & pop1$AGE<25] <- '0-25 years'
+pop1$age_group[pop1$AGE>=25 & pop1$AGE<45] <- '25-44 years'
+pop1$age_group[pop1$AGE>=45 & pop1$AGE<65] <- '45-64 years'
+pop1$age_group[pop1$AGE>=65 & pop1$AGE<75] <- '65-74 years'
+pop1$age_group[pop1$AGE>=75 & pop1$AGE<85] <- '75-84 years'
+pop1$age_group[pop1$AGE>=85 & pop1$AGE<110] <- '85 years and older' #category 85=85+; cat 999 is all combined
+
+pop1$state2 <- state.abb[match(pop1$NAME,state.name)]
+pop1$state2[pop1$NAME=='District of Columbia'] <- 'DC'
+
+pop1.m <- reshape2::melt(pop1[pop1$SEX==0 & pop1$ORIGIN==0 ,c('age_group','state2',"POPESTIMATE2010", "POPESTIMATE2011", "POPESTIMATE2012", "POPESTIMATE2013",  "POPESTIMATE2014", "POPESTIMATE2015", "POPESTIMATE2016", "POPESTIMATE2017", "POPESTIMATE2018", "POPESTIMATE2019" , "POPESTIMATE2020" )], id.vars=c('age_group','state2'))
+
+pop2 <- reshape2::dcast(pop1.m, age_group + state2 + variable ~., fun.aggregate = sum)
+pop2$year <- as.numeric(gsub( 'POPESTIMATE','',as.character(pop2$variable)))
+
+names(pop2) <- c('age_group','state','variable','popsize','year')
+
+pop2 <- pop2[,c('age_group','state','popsize','year')]
+
+pop2$weekN <- 27 #July 1
+
+pop2 <- pop2[pop2$state !='US',]
+
+#This is a hacky fix because we only have pop estimates up until July 2020; assume it is constant until july 2021 for now
+fill_2021 <- pop2[pop2$year==2020,]
+fill_2021$year <- 2021
+
+pop2 <- bind_rows(pop2, fill_2021)
+
+empty_ts <- readRDS('./Data/cleaned_file.rds')
+empty_ts <- empty_ts[,c('age_group','state','week_end')]
+empty_ts <- empty_ts[empty_ts$state!='US',]
+
+empty_ts$year <-year(empty_ts$week_end)
+empty_ts$weekN <-week(empty_ts$week_end)
+
+empty_ts2 <- merge(empty_ts, pop2, by=c('state','age_group','year','weekN'), all=T)
+
+filled_pop2 <- empty_ts2 %>%
+      group_by(age_group , state) %>%
+      arrange(age_group, state, year, weekN) %>%
+          mutate(time=seq(1,n())) %>%
+           mutate(pop.interpol=approx(time,popsize,time)$y)
+
+filled_pop2 <- filled_pop2[!is.na(filled_pop2$week_end),]
+
+filled_pop2 <- filled_pop2[,c('age_group','state','week_end','pop.interpol')]
+
+# test1 <- filled_pop2[filled_pop2$state=='NY' & filled_pop2$age_group=="75-84 years",]
+# plot(test1$week_end, test1$pop.interpol)
+```
+
+## Set up data for multilevel model
+
+```{r}
+
+ag3 <- readRDS('./Data/cleaned_file.rds')
+
+ag3 <- ag3[ag3$state!='US',]
+
+ag3$time <- 1:length(unique(ag3$week_end))
+ag3$sin1 <- sin(2*pi*ag3$time/52.1775)
+ag3$sin2 <- sin(2*pi*ag3$time*2/52.1775)
+ag3$sin3 <- sin(2*pi*ag3$time*3/52.1775)
+
+ag3$cos1 <- cos(2*pi*ag3$time/52.1775)
+ag3$cos2 <- cos(2*pi*ag3$time*2/52.1775)
+ag3$cos3 <- cos(2*pi*ag3$time*3/52.1775)
+ 
+ag3$age_group <- as.factor(ag3$age_group)
+ag3$state <- as.factor(ag3$state)
+
+#mod.inla <- inla(all_cause ~  , family='poisson')
+
+ag3$all_cause_pre <- ag3$all_cause
+
+ag3$all_cause_pre[ag3$week_end >= '2020-03-01'] <- NA
+ag3$time_scale <- as.vector(scale(ag3$time))
+
+# ag3.pre <- ag3[ag3$week_end < '2020-03-01',] %>%
+#   group_by(state,age_group) %>%
+#   summarize( log.ave.case = log(mean(all_cause)  ))
+  
+#ag3 <- merge( ag3, ag3.pre, by=c('state','age_group'))
+
+ag3$year <- year(ag3$week_end)
+ag3$weekN <- week(ag3$week_end)
+
+
+ag3 <- merge(ag3, filled_pop2, by=c('state','age_group', 'week_end'), all.x=T)
+
+
+ag3$log_pop <- log(ag3$pop.interpol)
+
+ag3$state_ag_combo <- as.factor(paste(ag3$state, ag3$age_group))
+ag3$state_ag_combo2 <- ag3$state_ag_combo
+ag3$state_ag_combo3 <- ag3$state_ag_combo
+
+ag3$age_group2 <- ag3$age_group
+ag3$age_group3 <- ag3$age_group
+
+ag3$state2 <- ag3$state
+ag3$state3 <- ag3$state
+
+ag3 <- ag3[!is.na(ag3$pop.interpol),]
+#ag3 <- ag3[ag3$year<=2020,]
+```
+
+## Multilevel model
+
+Simple GLM
+```{r}
+mod.glm1 <- glm(all_cause_pre ~ 
+                1 + time_scale + sin1 + sin2 + sin3 + cos1 +cos2+ cos3 +
+                  age_group + state + state_ag_combo +
+                  age_group*(time_scale + sin1 + sin2 + sin3 + cos1 +cos2+ cos3) +
+                  state*(time_scale + sin1 + sin2 + sin3 + cos1 +cos2+ cos3),#+
+                      #state*(time_scale+ sin1 + sin2 + sin3 + cos1 +cos2+ cos3) +
+                     # age_group*(time_scale + sin1 + sin2 + sin3 + cos1 +cos2+ cos3) ,
+                offset = log_pop,
+                family='poisson', data=ag3)
+summary(mod.glm1)
+```
+
+
+Model fit takes about 1 min
+```{r}
+
+mod.inla2 <- inla(all_cause_pre ~ 
+                1 + time_scale + sin1 + sin2 + sin3 + cos1 +cos2+ cos3 +
+                  age_group + state + state_ag_combo +
+                  age_group*(time_scale + sin1 + sin2 + sin3 + cos1 +cos2+ cos3) +
+                       state*(time_scale + sin1 + sin2 + sin3 + cos1 +cos2+ cos3) +
+                        
+                #Random slopes for the time trends and sin1, cos1 effects
+                f(state_ag_combo, time_scale,model='iid') +
+                  
+                f(state_ag_combo2, sin1,model='iid') +
+                f(state_ag_combo3, cos1,model='iid') 
+                    ,
+                                offset = log_pop,
+                family='poisson', data=ag3,
+                control.compute=list(config = TRUE))
+summary(mod.inla2)
+
+pred.sample.list <- inla.posterior.sample(n=500, mod.inla2, seed=123)
+
+post.labels<-dimnames(pred.sample.list[[1]]$latent)[[1]]
+
+posterior.samples<- sapply(pred.sample.list, '[[', 'latent') #should be 'joint' instead of 'latent' https://www.ucl.ac.uk/population-health-sciences/sites/population-health-sciences/files/inla_baio.pdf
+
+preds.select<-grep('Predictor',post.labels )
+
+posterior.preds<-exp(posterior.samples[preds.select,]) #lambda
+
+preds.summary <- t(apply(posterior.preds,1, quantile, probs=c(0.025,0.5,0.975)))
+
+ag3.preds <- cbind.data.frame(preds.summary,ag3)
+
+summary.list <- list( 'ag3.preds'=ag3.preds)
+
+saveRDS(summary.list,'./Data/INLA_results.rds')
+
+
+
+```
+
+```{r, fig.width=8, fig.height=12}
+summary.list <- readRDS('./Data/INLA_results.rds')
+
+summary.spl <- split(summary.list[[1]], paste(summary.list[[1]]$state, summary.list[[1]]$age_group ))
+
+states <- sapply(summary.spl, function(x) unique(x$state))
+ages <- sapply(summary.spl, function(x) unique(x$age_group))
+
+
+lapply(unique(ages), function(y){
+  summary.spl.age <- summary.spl[ages==y]
+  par(mfrow=c(6,3), mar=c(2,2,1,1))
+  lapply(summary.spl.age, function(x){
+    age_state_lab <- paste(unique(x$age_group),unique(x$state), sep=' ')
+    
+    plot(x$week_end, x$all_cause, type='l', bty='l', main=age_state_lab)
+    points(x$week_end, x$'50%', type='l', col='red', lty=2)
+    points(x$week_end, x$'50%', type='l', col='red', lty=2)
+    abline(v=as.Date('2020-03-01'), lty=2, col='gray')
+    
+    })
+
+})
+
+```
+
+
