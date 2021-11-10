@@ -64,6 +64,7 @@ library(htmlTable)
 library(RSocrata)
 library(pdftools)
 library(readr)
+library(patchwork)
 library(abind)
 library(gsubfn)
 library(dplyr)
@@ -175,6 +176,8 @@ v2 <- v1 %>%
   group_by(week_end,age_group,source) %>%
   summarize(all_cause = sum(all_cause))
 
+v2$week_end <- v2$week_end - 1
+
 ```
 
 Combine
@@ -204,7 +207,7 @@ p1 <- ggplot(c1[c1$source=='NCHS',], aes(x=week_end, y=all_cause)) +
       theme_classic() +
       theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
       geom_hline(yintercept=0, col='gray', lty=2) +
-        facet_wrap(~age_group , scales='free') +
+        facet_wrap(~age_group , scales='free', nrow=1) +
         theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) 
 p1
 
@@ -215,16 +218,43 @@ p2 <- ggplot(c1[c1$source=='VA',], aes(x=week_end, y=all_cause)) +
       theme_classic() +
       theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
       geom_hline(yintercept=0, col='gray', lty=2) +
-        facet_wrap(~age_group , scales='free') +
+        facet_wrap(~age_group , scales='free', nrow=1) +
         theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) 
 p2
 ```
 
+```{r, fig.width=12, fig.height=5}
+
+p2/p1
+
+
+```
+Try to overlay on same plot
+
+```{r}
+
+c1 <- c1 %>%
+  group_by(age_group, source) %>%
+  mutate(deaths_scale = (all_cause-mean(all_cause))/sd(all_cause) ) %>%
+  ungroup()
+
+p3 <- ggplot(c1 ,aes(x=week_end, y=deaths_scale, group=source, col=source) )  +
+      geom_line() +
+      ylab("Number of all-cause deaths") +
+      xlab("Date") +
+      theme_classic() +
+      theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
+      geom_hline(yintercept=0, col='gray', lty=2) +
+        facet_wrap(~age_group , scales='free') +
+        theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) 
+p3
+
+```
 
 ## run the model
 ```{r}
 
-mod1 <- excessCases(c1[c1$source=='VA',], 
+mod1 <- excessCases(c1, 
              statevar = "source",
              agevar='age_group',
              datevar = "week_end", 
@@ -234,7 +264,7 @@ mod1 <- excessCases(c1[c1$source=='VA',],
             denom.var = "one",
             extend.epiyear =TRUE,
             time.res='week',
-            model.type='poisson') 
+            model.type='negbin') 
 
 #saveRDS(mod1,'results1.rds')
 
@@ -249,16 +279,12 @@ print(app1)
 ```
 
 ## Heatmap type dashboard
-```{r}
-source('app.R')
-shiny::shinyApp(ui, server)
 
-```
 
 
 ```{r}
  excess_output=mod1
- statevar = "state"
+ statevar = "source"
  agevar='age_group'
  datevar = "date"
  outcome='all_cause'
@@ -276,27 +302,30 @@ shiny::shinyApp(ui, server)
         map(~(.x %>% gather(statevar, pred))) %>% bind_cols() %>% 
         set_names(c(statevar, datevar, "rm", "pred")) %>% 
         dplyr::select(-rm))) %>% bind_rows(.id = agevar)
+    
     df_oe <- df_y %>% left_join(df_pred, by = c(agevar, statevar, 
         datevar)) %>% mutate(oe = y/pred, year = year(get(datevar)), 
         week = week(get(datevar)), oe_fac = cut(oe, breaks = c(-Inf, 
-            0.5, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 3.5, 4, 6, 8, 
-            10, Inf), labels = c("0.5", "1.0", "1.25", 
-            "1.5", "1.75", "2.0", "2.5", 
-            "3.0", "3.5", "4.0", "6.0", 
-            "8.0", "10.0", ">10.0")), oe_fac_rev = factor(oe_fac, 
+            0.5, 0.9,1, 1.1, 1.2, 1.3, 1.4, 1.5, Inf), labels = c("0.5", '0.9',"1.0", "1.1", 
+            "1.2", "1.3", "1.4", "1.5", 
+           ">1.5")), oe_fac_rev = factor(oe_fac, 
             levels = rev(levels(oe_fac))))
+    
     dates <- as.Date(unique(df_oe[[datevar]]))
+    
     states <- unique(df_oe[[statevar]])
+    
     age_groups <- unique(df_oe[[agevar]])
+    
     last.date <- max(dates)
+    
     last.date.format <- format(last.date, "%b %d, %Y")
 
     ui <- fluidPage(shiny::titlePanel(paste0("Data through ", 
         last.date.format)), shiny::sidebarLayout(shiny::sidebarPanel(shiny::selectInput(input = "set.states", 
-        label = "State:", choice = states, selected = c("NY"), 
+        label = "State:", choice = states, selected = c("NY"),  
         multiple = T), shiny::selectInput(input = "set.ages", 
-        label = "Age group:", choice = age_groups, selected = c("18 and under", 
-            "19-64", "65 and over"), multiple = T), 
+        label = "Age group:", choice = age_groups, selected = c("25-44 years","45-64 years","65-74 years",        "75-84 years","85 years and older"), multiple = T), 
         shiny::sliderInput(input = "display.dates", label = "Earliest date to display", 
             min = min(dates), max = dates[length(dates) - 2], 
             step = 7, value = dates[length(dates) - round(length(dates)/5)])), 
@@ -312,14 +341,15 @@ shiny::shinyApp(ui, server)
         output$plot = renderPlot({
             ggplot(data = dates_states_ages_sel(), aes(x = factor(get(datevar)), 
                 y = get(yaxis))) + geom_raster(aes(fill = oe_fac_rev), 
-                interpolate = F) + scale_fill_manual(values = c(`>10.0` = "#5c0900", 
-                `10.0` = "#850d00", `8.0` = "#a31000", 
-                `6.0` = "#c21300", `4.0` = "#eb1800", 
-                `3.5` = "#ff3e29", `3.0` = "#ff7014", 
-                `2.5` = "#ff9049", `2.0` = "#ffaf35", 
-                `1.75` = "#ffd230", `1.5` = "#a3a3cc", 
-                `1.25` = "#b7b7d7", `1.0` = "#cacae2", 
-                `0.5` = "#dbdbeb")) + xlab("Time") + 
+                interpolate = F) + scale_fill_manual(values = c(`>1.5` = "#67000d", 
+                  `1.5` = "#a50f15", 
+                `1.4` = "#cb181d", 
+                `1.3` = "#ef3b2c", 
+                `1.2` = "#fb6a4a", 
+                `1.1` = "#fc9272", 
+                `1.0` = "#fcbba1", 
+                `0.9` = "#fee0d2", 
+                `0.5` = "#fff5f0")) + xlab("Time") + 
                 labs(fill = "O/E Ratio") + scale_x_discrete(expand = c(0, 
                 0)) + scale_y_discrete(expand = c(0, 0)) + facet_grid(get(facet) ~ 
                 .) + theme_bw() + theme(axis.title.y = element_blank(), 
@@ -353,7 +383,18 @@ sum.pred.iter <-
 
 ```
 
-## Sum across age groups, by state
+excess by age group and databse
+
+```{r}
+sum.obs.ac.tot <- apply(sum.obs.ac,c(2,3), sum)
+
+rr.iter <- apply(sum.pred.iter, c(1), function(x) sum.obs.ac.tot/x)
+
+rr.q <- t(apply(rr.iter,1, quantile, probs=c(0.025, 0.5, 0.975)))
+
+```
+
+ Sum across age groups, by database
 Print the 95% CIs for the RR (overall observed/expected deaths by state)
 ```{r}
 
@@ -371,7 +412,7 @@ RR.state.q
 
 ```{r}
 excess_output = mod1
-            statevar = "state"
+            statevar = "source"
              agevar='age_group'
              datevar = "date" 
              outcome='all_cause' 
@@ -393,6 +434,40 @@ excess_output = mod1
     bind_rows(.id = agevar) 
   
   
+```
+
+rr_time_series
+```{r}
+
+rr.ls <- lapply(mod1[[1]] , function(x){
+rr.nchs <- x$NCHS$y/x$NCHS$pred 
+rr.va <- x$VA$y/x$VA$pred 
+date <- x$NCHS$date
+cbind.data.frame(date, rr.nchs, rr.va, age_group=)
+})
+
+rr.ls <- lapply(names(rr.ls) , function(x) {
+  rr.ls[[x]]$age_group=x 
+  return(rr.ls[[x]])
+  }
+  )
+
+rr <- bind_rows(rr.ls)
+rr <- rr[rr$date>='2019-01-01',]
+
+rr.m <- melt(rr, id.vars = c('age_group','date'))
+
+p4 <- ggplot(rr.m ,aes(x=date, y=value, group=variable , col=variable ) )  +
+      geom_line() +
+      ylab("Observed.expected") +
+      xlab("Date") +
+      theme_classic() +
+       ggtitle ('Observed/expected in va vs NCHS')+ 
+      theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
+      geom_hline(yintercept=1, col='gray', lty=2) +
+        facet_wrap(~age_group ) +
+        theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) 
+p4
 ```
 
 
