@@ -147,11 +147,22 @@ age1$one <-1
 
 #age1$age_group[age1$age_group=="Under 25 years"] <- '0-25 years'
 
+age1 <- age1[age1$age_group %in% c('25-44 years' ,'45-64 years','65-74 years','75-84 years' ,  '85 years and older'),]
 
+age1$region[age1$state %in% c('ME','VT','NH','MA','CT','RI','NY','NJ','PA')] <- 'Northeast'
+age1$region[age1$state %in% c('DE','DC','FL','GA','MD','NC','SC','VA','WV','AL','MS','KY','TN','AK','LA','OK','TX')] <- 'South'
+age1$region[age1$state %in% c('AZ','CA','ID','NM','MT','UT','WY','NV','AK','CA','HI','OR','WA')] <- 'West'
+age1$region[age1$state %in% c('IN','IL','MI','OH','WI','IA','KS','MN','MO','NE','ND','SD')] <- 'Midwest'
 
-age1.us <- age1[age1$state=='US' & age1$age_group %in% c('25-44 years' ,'45-64 years','65-74 years','75-84 years' ,  '85 years and older'),c('week_end','age_group', 'all_cause')]
+age1.region <- age1 %>%
+      group_by(region, age_group, week_end) %>%
+      summarise(all_cause=sum(all_cause))
 
-age1.us$source <- 'NCHS'
+age1.region$source  <- 'NCHS'
+
+#age1.us <- age1[age1$state=='US' & age1$age_group %in% c('25-44 years' ,'45-64 years','65-74 years','75-84 years' ,  '85 years and older'),c('week_end','age_group', 'all_cause')]
+
+#age1.us$source <- 'NCHS'
 
 
 ```
@@ -159,13 +170,19 @@ age1.us$source <- 'NCHS'
 
 VA data
 ```{r}
-v1 <- read.csv('./Data/Confidential/va_aggdata_all.csv')
+v1 <- read.csv('./Data/Confidential/va_aggdata_withregion.csv')
 v1$source <- 'VA'
+
+
 v1 <- v1[v1$Age.Group %in% c('25-44 years' ,'45-64 years','65-74 years','75-84 years' ,  '85 years and older'),]
-v1 <- v1[,c('Week.Ending.Date', 'Age.Group','Number.of.Deaths', 'source')]
-names(v1) <- c('week_end','age_group', 'all_cause', 'source')
+
+v1 <- v1[,c('Week.Ending.Date', 'Age.Group','Number.of.Deaths', 'source', 'region')]
+
+names(v1) <- c('week_end','age_group', 'all_cause', 'source','region')
 
 v1$week_end <- as.Date(v1$week_end)
+
+v1 <- v1[!is.na(v1$all_cause),]
 
 v1$all_cause <- as.numeric(as.character(v1$all_cause))
 
@@ -173,7 +190,7 @@ v1$all_cause[is.na(v1$all_cause)] <- 5
 
 #some values split across multiple rows around Jan 1
 v2 <- v1 %>%
-  group_by(week_end,age_group,source) %>%
+  group_by(region, week_end,age_group,source) %>%
   summarize(all_cause = sum(all_cause))
 
 v2$week_end <- v2$week_end - 1
@@ -183,7 +200,7 @@ v2$week_end <- v2$week_end - 1
 Combine
 ```{r}
 
-c1 <- bind_rows( v2 ,age1.us)
+c1 <- bind_rows( v2 ,age1.region)
 
 c1$one <- 1
 
@@ -195,12 +212,15 @@ c1 <- c1[c1$week_end>=max.start & c1$week_end<=min.end,]
 c1 <- c1[order(c1$source, c1$age_group, c1$week_end),]
 
 c1 <- c1[c1$week_end <= '2021-01-01',]
+
+c1 <- c1[c1$region %in% c('Midwest','Northeast','South', 'West'), ]
+
 ```
 
 
 
 ```{r}
-p1 <- ggplot(c1[c1$source=='NCHS',], aes(x=week_end, y=all_cause)) +
+p1 <- ggplot(c1[c1$source=='NCHS',], aes(x=week_end, y=all_cause, group=region, col=region)) +
       geom_line() +
       ylab("Number of all-cause deaths") +
       xlab("Date") +
@@ -209,9 +229,8 @@ p1 <- ggplot(c1[c1$source=='NCHS',], aes(x=week_end, y=all_cause)) +
       geom_hline(yintercept=0, col='gray', lty=2) +
         facet_wrap(~age_group , scales='free', nrow=1) +
         theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) 
-p1
 
-p2 <- ggplot(c1[c1$source=='VA',], aes(x=week_end, y=all_cause)) +
+p2 <- ggplot(c1[c1$source=='VA',], aes(x=week_end, y=all_cause,group=region, col=region)) +
       geom_line() +
       ylab("Number of all-cause deaths") +
       xlab("Date") +
@@ -220,7 +239,7 @@ p2 <- ggplot(c1[c1$source=='VA',], aes(x=week_end, y=all_cause)) +
       geom_hline(yintercept=0, col='gray', lty=2) +
         facet_wrap(~age_group , scales='free', nrow=1) +
         theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) 
-p2
+
 ```
 
 ```{r, fig.width=12, fig.height=5}
@@ -234,7 +253,7 @@ Try to overlay on same plot
 ```{r}
 
 c1 <- c1 %>%
-  group_by(age_group, source) %>%
+  group_by(age_group, region, source) %>%
   mutate(deaths_scale = (all_cause-mean(all_cause))/sd(all_cause) ) %>%
   ungroup()
 
@@ -245,7 +264,7 @@ p3 <- ggplot(c1 ,aes(x=week_end, y=deaths_scale, group=source, col=source) )  +
       theme_classic() +
       theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
       geom_hline(yintercept=0, col='gray', lty=2) +
-        facet_wrap(~age_group , scales='free') +
+        facet_wrap(region~age_group , scales='free') +
         theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) 
 p3
 
@@ -254,9 +273,10 @@ p3
 ## run the model
 ```{r}
 
+c1$age_region <- paste(c1$age_group, c1$region, sep='_')
 mod1 <- excessCases(c1, 
              statevar = "source",
-             agevar='age_group',
+             agevar='age_region',
              datevar = "week_end", 
              use.syndromes = c("all_cause"),
             extrapolation.date = as.Date("2020-03-01"), 
@@ -264,7 +284,7 @@ mod1 <- excessCases(c1,
             denom.var = "one",
             extend.epiyear =TRUE,
             time.res='week',
-            model.type='negbin') 
+            model.type='poisson') 
 
 #saveRDS(mod1,'results1.rds')
 
@@ -400,9 +420,9 @@ Print the 95% CIs for the RR (overall observed/expected deaths by state)
 
 pred.state.iter <- apply(sum.pred.iter,c(1,2), sum)
 
-sum.obs.ac.state <- apply(sum.obs.ac, c(2), sum)
+sum.obs.ac.state <- apply(sum.obs.ac, c(2,3), sum)
 
-RR.state <- apply(pred.state.iter,1, function(x) sum.obs.ac.state/x)
+str(RR.state) <- apply(pred.state.iter,1, function(x) sum.obs.ac.state/x)
 RR.state.q <- round(t(apply(RR.state,1,quantile, probs=c(0.025,0.5,0.975))),2)
 RR.state.q
 
@@ -413,7 +433,7 @@ RR.state.q
 ```{r}
 excess_output = mod1
             statevar = "source"
-             agevar='age_group'
+             agevar='age_region'
              datevar = "date" 
              outcome='all_cause' 
              yaxis=statevar
@@ -439,18 +459,13 @@ excess_output = mod1
 rr_time_series
 ```{r}
 
-rr.ls <- lapply(mod1[[1]] , function(x){
-rr.nchs <- x$NCHS$y/x$NCHS$pred 
-rr.va <- x$VA$y/x$VA$pred 
-date <- x$NCHS$date
-cbind.data.frame(date, rr.nchs, rr.va, age_group=)
+rr.ls <- lapply(names(mod1[[1]]) , function(x){
+  ds <- mod1[[1]][[x]]
+  rr.nchs <- ds$NCHS$y/ds$NCHS$pred 
+  rr.va <- ds$VA$y/ds$VA$pred 
+  date <- ds$NCHS$date
+  return(cbind.data.frame(date, rr.nchs, rr.va, 'age_group'=x))
 })
-
-rr.ls <- lapply(names(rr.ls) , function(x) {
-  rr.ls[[x]]$age_group=x 
-  return(rr.ls[[x]])
-  }
-  )
 
 rr <- bind_rows(rr.ls)
 rr <- rr[rr$date>='2019-01-01',]
