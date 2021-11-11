@@ -125,7 +125,7 @@ devtools::install_github("weinbergerlab/ExcessILI")
 ## Download and archive the latest version of the data from NCHS
 set maxage to a small number (e.g. 24, for 24 hours) if you want to to download a recent copy of the data; otherwise it will use the most recent copy on disk in the Data/nchs_age_state folder
 ```{r}
-nchs.age.state <- runIfExpired('nchs_age_state', maxage=999,
+nchs.age.state <- runIfExpired('nchs_age_state', maxage=9999999999,
  ~read.csv("https://data.cdc.gov/api/views/y5bj-9g5w/rows.csv?accessType=DOWNLOAD") 
  )
 
@@ -160,17 +160,12 @@ age1.region <- age1 %>%
 
 age1.region$source  <- 'NCHS'
 
-#age1.us <- age1[age1$state=='US' & age1$age_group %in% c('25-44 years' ,'45-64 years','65-74 years','75-84 years' ,  '85 years and older'),c('week_end','age_group', 'all_cause')]
-
-#age1.us$source <- 'NCHS'
-
-
 ```
 
 
 VA data
 ```{r}
-v1 <- read.csv('./Data/Confidential/va_aggdata_withregion.csv')
+v1 <- read.csv('./Data/Confidential/aggdata_withregion.csv')
 v1$source <- 'VA'
 
 
@@ -204,8 +199,8 @@ c1 <- bind_rows( v2 ,age1.region)
 
 c1$one <- 1
 
-max.start <- max(min(v2$week_end) , min(age1.us$week_end))
-min.end <- min(max(v2$week_end) , max(age1.us$week_end))
+max.start <- max(min(v2$week_end) , min(age1.region$week_end))
+min.end <- min(max(v2$week_end) , max(age1.region$week_end))
 
 c1 <- c1[c1$week_end>=max.start & c1$week_end<=min.end,]
 
@@ -250,7 +245,7 @@ p2/p1
 ```
 Try to overlay on same plot
 
-```{r}
+```{r, fig.width=10, fig.height=10}
 
 c1 <- c1 %>%
   group_by(age_group, region, source) %>%
@@ -305,7 +300,7 @@ print(app1)
 ```{r}
  excess_output=mod1
  statevar = "source"
- agevar='age_group'
+ agevar='age_region'
  datevar = "date"
  outcome='all_cause'
  yaxis=statevar
@@ -416,16 +411,38 @@ rr.q <- t(apply(rr.iter,1, quantile, probs=c(0.025, 0.5, 0.975)))
 
  Sum across age groups, by database
 Print the 95% CIs for the RR (overall observed/expected deaths by state)
-```{r}
+```{r, fig.width=7, fig.height=7}
 
-pred.state.iter <- apply(sum.pred.iter,c(1,2), sum)
+#pred.state.iter <- apply(sum.pred.iter,c(1,2), sum)
 
 sum.obs.ac.state <- apply(sum.obs.ac, c(2,3), sum)
 
-str(RR.state) <- apply(pred.state.iter,1, function(x) sum.obs.ac.state/x)
-RR.state.q <- round(t(apply(RR.state,1,quantile, probs=c(0.025,0.5,0.975))),2)
-RR.state.q
+RR.state <- sapply(1:10000,function(x) sum.obs.ac.state/sum.pred.iter[x,,] , simplify='array')
 
+RR.state.q <- round(apply(RR.state,c(1,2),quantile, probs=c(0.025,0.5,0.975)),2)
+
+dimnames(RR.state.q)[[2]] <- dimnames(sum.obs.ac.state)[[1]]
+dimnames(RR.state.q)[[3]] <- dimnames(sum.obs.ac.state)[[2]]
+
+
+RR.state.q.m <- melt(RR.state.q)
+RR.state.q.c <- dcast(RR.state.q.m, Var2+Var3 ~ Var1)
+
+names(RR.state.q.c)[1:2] <- c('source', 'age_region') 
+
+lab1 <- as.data.frame(matrix(unlist(str_split(RR.state.q.c$age_region, fixed("_"))), ncol=2, byrow=T))
+names(lab1) <- c('age_group', 'region')
+  
+RR.state.q.c <- cbind.data.frame(RR.state.q.c, lab1)
+
+p1 <-ggplot(RR.state.q.c, aes( y=`50%`, x=age_group, group=source, col=source)) + 
+  geom_point(position = position_dodge(0.3))+
+  geom_errorbar(aes(ymin=`2.5%`, ymax=`97.5%`), width=0, position = position_dodge(0.3)) +
+  theme_classic() +
+      theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
+      geom_hline(yintercept=1, col='gray', lty=2) +
+      facet_wrap(~region ) 
+p1
 ```
 
 
@@ -565,9 +582,7 @@ filled_pop2 <- filled_pop2[,c('age_group','state','week_end','pop.interpol')]
 
 ```{r}
 
-ag3 <- readRDS('./Data/cleaned_file.rds')
-
-ag3 <- ag3[ag3$state!='US',]
+c2 <- c1
 
 ag3$time <- 1:length(unique(ag3$week_end))
 ag3$sin1 <- sin(2*pi*ag3$time/52.1775)
