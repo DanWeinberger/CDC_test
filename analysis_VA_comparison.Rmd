@@ -158,7 +158,6 @@ p3
 
 ## run the model
 ```{r}
- excess_output=mod1
  statevar = "source"
  agevar='age_region'
  datevar = "week_end"
@@ -390,7 +389,7 @@ filled_pop2 <- filled_pop2[,c('age_group','state','week_end','pop.interpol')]
 # plot(test1$week_end, test1$pop.interpol)
 ```
 
-## Set up data for multilevel model
+## Set up data for INLA model
 
 ```{r}
 
@@ -430,9 +429,9 @@ ag3$weekN <- week(ag3$week_end)
 
 #ag3$log_pop <- log(ag3$pop.interpol)
 
-ag3$state_ag_combo <- as.factor(paste(ag3$state, ag3$age_group))
-ag3$state_ag_combo2 <- ag3$state_ag_combo
-ag3$state_ag_combo3 <- ag3$state_ag_combo
+# ag3$state_ag_combo <- as.factor(paste(ag3$state, ag3$age_group))
+# ag3$state_ag_combo2 <- ag3$state_ag_combo
+# ag3$state_ag_combo3 <- ag3$state_ag_combo
 
 ag3$age_group2 <- ag3$age_group
 ag3$age_group3 <- ag3$age_group
@@ -459,16 +458,24 @@ preds_total <- bind_rows(lapply(mod1,'[[','preds_total' ))
 preds_total_qtr <- bind_rows(lapply(mod1,'[[','preds_qtr' ))
 preds_total_wk <- bind_rows(lapply(mod1,'[[','preds_week' ))
 
+#Splits out the labels we need and add as column
+lab_split <- function(ds, var_to_split){
+  ds <- ds%>%
+    mutate(region = sapply(strsplit(as.character(ds[,var_to_split]), "_"),"[", 1),
+           age_group= sapply(strsplit(as.character(ds[,var_to_split]), "_"),"[", 2), 
+           source =sapply(strsplit(as.character(ds[,var_to_split]), "_"),"[", 3))
+  return(ds)
+}
+
+preds_total_wk <- lab_split(preds_total_wk, 'age_region_source')
+preds_total_qtr <- lab_split(preds_total_qtr, 'age_region_source')
+preds_total <- lab_split(preds_total, 'age_region_source')
+
+
 ```
+
+
 ```{r}
-
-preds_total_wk$region <- sapply(strsplit(as.character(preds_total_wk$age_region_source), "_"),"[", 1)
-
-preds_total_wk$age_group <- sapply(strsplit(as.character(preds_total_wk$age_region_source), "_"),"[", 2)
-
-preds_total_wk$source <- sapply(strsplit(as.character(preds_total_wk$age_region_source), "_"),"[", 3)
-
-
 
 plot_ts_region <- function( source_data='NCHS'){
   
@@ -485,6 +492,24 @@ plot_ts_region <- function( source_data='NCHS'){
   return(p1)
 }
 ```
+
+RRs
+```{r}
+preds_total$RR_mean <- preds_total$all_cause/preds_total$pred_mean
+preds_total$RR_lcl <- preds_total$all_cause/preds_total$pred_lcl
+preds_total$RR_ucl <- preds_total$all_cause/preds_total$pred_ucl
+
+
+p1 <-ggplot(preds_total, aes( y=RR_mean, x=age_group, group=source, col=source)) + 
+  geom_point(position = position_dodge(0.3))+
+  geom_errorbar(aes(ymin=RR_lcl, ymax=RR_ucl), width=0, position = position_dodge(0.3)) +
+  theme_classic() +
+      theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
+      geom_hline(yintercept=1, col='gray', lty=2) +
+      facet_wrap(~region ) 
+p1
+```
+
 
 
 
