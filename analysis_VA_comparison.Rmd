@@ -180,7 +180,7 @@ mod1 <- excessCases(c1,
 
 ## Interactive dashboard plot
 
-```{r}
+```{r, eval=F}
 app1 <-dashboardPlot(mod1)
 print(app1)
 ```
@@ -449,7 +449,7 @@ ag3$age_region_source <- paste(ag3$region, ag3$age_group, ag3$source, sep='_')
 
 
 ## Simple GLM, in INLA. Fit separately by group
-
+Need to use Negbin, otherwise it fails on some groups with Poisson
 ```{r}
 
 mod1 <- pblapply(unique(ag3$age_region_source), inla_mod_group , ds.in=ag3)
@@ -475,7 +475,8 @@ preds_total <- lab_split(preds_total, 'age_region_source')
 ```
 
 
-```{r}
+
+```{r, fig.width=10, fig.height=10}
 
 plot_ts_region <- function( source_data='NCHS'){
   
@@ -487,10 +488,15 @@ plot_ts_region <- function( source_data='NCHS'){
     theme_classic() +
     theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
     geom_hline(yintercept=0, col='gray', lty=2) +
-    facet_wrap(region~age_group , scales='free', nrow=1) +
+    facet_wrap(region~age_group , scales='free') +
     theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) 
   return(p1)
 }
+p1 <- plot_ts_region('NCHS')
+p2 <- plot_ts_region('VA')
+
+p1
+p2
 ```
 
 RRs
@@ -500,14 +506,14 @@ preds_total$RR_lcl <- preds_total$all_cause/preds_total$pred_lcl
 preds_total$RR_ucl <- preds_total$all_cause/preds_total$pred_ucl
 
 
-p1 <-ggplot(preds_total, aes( y=RR_mean, x=age_group, group=source, col=source)) + 
+p2 <-ggplot(preds_total, aes( y=RR_mean, x=age_group, group=source, col=source)) + 
   geom_point(position = position_dodge(0.3))+
   geom_errorbar(aes(ymin=RR_lcl, ymax=RR_ucl), width=0, position = position_dodge(0.3)) +
   theme_classic() +
       theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
       geom_hline(yintercept=1, col='gray', lty=2) +
       facet_wrap(~region ) 
-p1
+p2
 ```
 
 
