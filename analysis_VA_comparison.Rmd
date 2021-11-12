@@ -36,16 +36,6 @@ knitr::opts_chunk$set(
     nframes = 50)
 )
 
-extrap.date <-  as.Date(params$extrap.date)
-count.start.date <- as.Date(params$count.start.date)
-end.data.date <- as.Date(params$end.data.date)
-
-state.name2 <- c(state.name, 'District of Columbia','Puerto Rico', 'United States', 'New York City')
-state.abb2 <- c(state.abb, 'DC','PR','US','NYC')
-
-
-last.date.format <- 
-  format(end.data.date, '%b %d, %Y')
 ```
 
 ```{r setup}
@@ -76,13 +66,14 @@ library(shiny)
 library(rjags)
 library(INLA)
 library(lme4)
+library(pbapply)
 #library(jsonlite)
 set.seed(123)
 
 source('./R/process_va_region.R')
 source('./R/process_nchs_region.R')
 source('./R/inla_mod_grp.R')
-
+source('./R/plot_ts_region.R')
 source('./R/run_if_expired.R')
 ```
 
@@ -107,7 +98,7 @@ age1.region <- process_nchs_region(nchs.age.state)
 
 VA data
 ```{r}
-v1 <- read.csv('./Data/Confidential/va_aggdata_withregion.csv')
+v1 <- read.csv('./Data/Confidential/aggdata_withregion.csv')
 v2 <- process_va_region(v1)
 ```
 
@@ -278,7 +269,6 @@ excess_output = mod1
              yaxis=statevar
              facet=agevar
 
-
   df_y <- 
     excess_output  %>% 
     pluck(outcome) %>% 
@@ -447,8 +437,8 @@ ag3$state_ag_combo3 <- ag3$state_ag_combo
 ag3$age_group2 <- ag3$age_group
 ag3$age_group3 <- ag3$age_group
 
-ag3$state2 <- ag3$state
-ag3$state3 <- ag3$state
+# ag3$state2 <- ag3$state
+# ag3$state3 <- ag3$state
 
 ag3$quarter <- quarter(ag3$week_end)
 ag3$age_region_source <- paste(ag3$region, ag3$age_group, ag3$source, sep='_')
@@ -461,12 +451,43 @@ ag3$age_region_source <- paste(ag3$region, ag3$age_group, ag3$source, sep='_')
 
 ## Simple GLM, in INLA. Fit separately by group
 
-
 ```{r}
 
 mod1 <- pblapply(unique(ag3$age_region_source), inla_mod_group , ds.in=ag3)
 
+preds_total <- bind_rows(lapply(mod1,'[[','preds_total' ))
+preds_total_qtr <- bind_rows(lapply(mod1,'[[','preds_qtr' ))
+preds_total_wk <- bind_rows(lapply(mod1,'[[','preds_week' ))
+
 ```
+```{r}
+
+preds_total_wk$region <- sapply(strsplit(as.character(preds_total_wk$age_region_source), "_"),"[", 1)
+
+preds_total_wk$age_group <- sapply(strsplit(as.character(preds_total_wk$age_region_source), "_"),"[", 2)
+
+preds_total_wk$source <- sapply(strsplit(as.character(preds_total_wk$age_region_source), "_"),"[", 3)
+
+
+
+plot_ts_region <- function( source_data='NCHS'){
+  
+  p1 <- ggplot(preds_total_wk[preds_total_wk$source==source_data,], aes(x=week_end, y=all_cause, group=region, col=region)) +
+    geom_line() +
+    geom_ribbon(aes(ymin=pred_lcl, ymax=pred_ucl), alpha=0.2, col='gray') +
+    ylab("Number of all-cause deaths") +
+    xlab("Date") +
+    theme_classic() +
+    theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
+    geom_hline(yintercept=0, col='gray', lty=2) +
+    facet_wrap(region~age_group , scales='free', nrow=1) +
+    theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) 
+  return(p1)
+}
+```
+
+
+
 
 
 ## Multilevel model
