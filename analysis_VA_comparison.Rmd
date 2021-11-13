@@ -50,6 +50,7 @@ library(plotly)
 library(MMWRweek)
 library(readr)
 library(rjson)
+library(parallel)
 library(htmlTable)
 library(RSocrata)
 library(pdftools)
@@ -59,6 +60,7 @@ library(abind)
 library(gsubfn)
 library(dplyr)
 library(RCurl)
+library(dplyr)
 library(tidyverse)
 library(gifski)
 library(gganimate)
@@ -451,8 +453,16 @@ ag3$age_region_source <- paste(ag3$region, ag3$age_group, ag3$source, sep='_')
 ## Simple GLM, in INLA. Fit separately by group
 Need to use Negbin, otherwise it fails on some groups with Poisson
 ```{r}
+nCores <- detectCores() - 1
+set.seed(123)
+cl1 <-makeCluster(nCores)
+clusterExport(cl1, c('inla_mod_group', 'inla','inla.posterior.sample'), environment())
+clusterEvalQ(cl1,  library(dplyr))
+clusterEvalQ(cl1,  library(reshape2))
 
-mod1 <- pblapply(unique(ag3$age_region_source), inla_mod_group , ds.in=ag3)
+  mod1 <- parLapply(cl=cl1,unique(ag3$age_region_source), inla_mod_group , ds.in=ag3)
+stopCluster(cl1)
+
 
 preds_total <- bind_rows(lapply(mod1,'[[','preds_total' ))
 preds_total_qtr <- bind_rows(lapply(mod1,'[[','preds_qtr' ))
@@ -500,7 +510,7 @@ p2
 ```
 
 RRs
-```{r}
+```{r, fig.width==7, fig.height=7}
 preds_total$RR_mean <- preds_total$all_cause/preds_total$pred_mean
 preds_total$RR_lcl <- preds_total$all_cause/preds_total$pred_lcl
 preds_total$RR_ucl <- preds_total$all_cause/preds_total$pred_ucl

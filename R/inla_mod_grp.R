@@ -14,21 +14,21 @@ inla_mod_group <- function(select.grp, ds.in){
                 control.family=list(link='log'),
                 control.compute=list(config = TRUE))
   
-  pred.sample.list <- inla.posterior.sample(n=500, test1, seed=123)
+  pred.sample.list <- inla.posterior.sample(n=100, test1, seed=123)
   
   pred.interval.func <- function(sample.ds, dist=c('nb','poisson')){
     mu1 <- exp(sample.ds$latent[grep('Predictor', row.names(sample.ds$latent))])
     if(dist=='nb'){
       nb.size1 = sample.ds$hyperpar
-      pred <- replicate(20, rnbinom(n=length(mu1), mu=mu1, size=nb.size1), simplify = 'array')
+      pred <- replicate(10, rnbinom(n=length(mu1), mu=mu1, size=nb.size1), simplify = 'array')
     }else{
-      pred <- replicate(20, rpois(n=length(mu1), lambda=mu1), simplify = 'array')
+      pred <- replicate(10, rpois(n=length(mu1), lambda=mu1), simplify = 'array')
     }
     return(pred)
   }
   posterior.preds <- sapply(pred.sample.list,pred.interval.func,dist='nb', simplify='array')
   posterior.preds.m <- reshape2::melt(posterior.preds)
-  posterior.preds.c <- reshape2::dcast(posterior.preds.m, Var1 ~ Var2 + Var3)
+  posterior.preds.c <- reshape2::dcast(posterior.preds.m, Var1 ~ Var3 + Var2) 
   posterior.preds.c$Var1 <- NULL
     
   colnames(posterior.preds.c) <- paste0('ColA', 1: ncol(posterior.preds.c))
@@ -45,18 +45,19 @@ inla_mod_group <- function(select.grp, ds.in){
 
   options(dplyr.summarise.inform = FALSE)
   
-  posterior.preds.df.qtr <- posterior.preds.df %>%
+
+   posterior.preds.df.qtr <- posterior.preds.df %>%
       group_by(year ,quarter) %>%
-      summarise(across(c(all_cause,ColA1:ColA500), sum ) ) %>%
+      summarise(across(c(all_cause,starts_with("ColA")), sum ) ) %>%
       ungroup() %>%
       rowwise() %>%
-      mutate( pred_mean= mean(ColA1:ColA500), pred_lcl= quantile(ColA1:ColA500,probs=0.025),pred_ucl= quantile(ColA1:ColA500,probs=0.975), age_region_source=select.grp ) %>%
+      mutate( pred_mean= mean(c_across(starts_with("ColA"))), pred_lcl= quantile(c_across(starts_with("ColA")),probs=0.025), pred_ucl= quantile(c_across(starts_with("ColA")),probs=0.975), age_region_source=select.grp ) %>%
       ungroup() %>%
       select(year, quarter, pred_mean, pred_lcl, pred_ucl,all_cause ,age_region_source)
     
   posterior.preds.total <- posterior.preds.df[is.na(ds$all_cause_pre),] %>%
-    summarise(across(c(all_cause,ColA1:ColA500), sum ) ) %>%
-    mutate( pred_mean= mean(ColA1:ColA500), pred_lcl= quantile(ColA1:ColA500,probs=0.025),pred_ucl= quantile(ColA1:ColA500,probs=0.975) , age_region_source=select.grp) %>%
+    summarise(across(c(all_cause,starts_with("ColA")), sum ) ) %>%
+    mutate( pred_mean= mean(c_across(starts_with("ColA"))), pred_lcl= quantile(c_across(starts_with("ColA")),probs=0.025),pred_ucl= quantile(c_across(starts_with("ColA")),probs=0.975) , age_region_source=select.grp) %>%
     select(pred_mean, pred_lcl, pred_ucl,all_cause,age_region_source )
   
   #}
