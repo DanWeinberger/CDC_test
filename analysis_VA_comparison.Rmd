@@ -36,16 +36,6 @@ knitr::opts_chunk$set(
     nframes = 50)
 )
 
-extrap.date <-  as.Date(params$extrap.date)
-count.start.date <- as.Date(params$count.start.date)
-end.data.date <- as.Date(params$end.data.date)
-
-state.name2 <- c(state.name, 'District of Columbia','Puerto Rico', 'United States', 'New York City')
-state.abb2 <- c(state.abb, 'DC','PR','US','NYC')
-
-
-last.date.format <- 
-  format(end.data.date, '%b %d, %Y')
 ```
 
 ```{r setup}
@@ -60,6 +50,7 @@ library(plotly)
 library(MMWRweek)
 library(readr)
 library(rjson)
+library(parallel)
 library(htmlTable)
 library(RSocrata)
 library(pdftools)
@@ -69,6 +60,7 @@ library(abind)
 library(gsubfn)
 library(dplyr)
 library(RCurl)
+library(dplyr)
 library(tidyverse)
 library(gifski)
 library(gganimate)
@@ -76,43 +68,18 @@ library(shiny)
 library(rjags)
 library(INLA)
 library(lme4)
+library(pbapply)
 #library(jsonlite)
 set.seed(123)
 
+source('./R/process_va_region.R')
+source('./R/process_nchs_region.R')
+source('./R/inla_mod_grp.R')
+source('./R/plot_ts_region.R')
+source('./R/run_if_expired.R')
 ```
 
-```{r archivfunc}
-# Using ExcessILI's data archiving functions, returns the most recent copy of
-# output obtained by running a function or formula \code{f}, unless this 
-# copy doesn't exist or is older (by modification time) than \code{maxage}.
-# In that case, \code{f} is run and the output is archived into the folder
-# Data/'storeName' as an RDS file, using the function ExcessILI::storeRDS.
-#
-# @param storeName A string. The name of the folder to store output in
-# @param f A function or formula taking no arguments. Formulas are coerced to
-#   functions.
-# @param maxage How old can any existing archived file be before \code{f} is 
-#   called again?
-runIfExpired <- function(storeName, f, maxage=hours(99999999999999)) {
-  basepath <- "Data/"
-  mostRecent <- mostRecentTimestamp(storeName, basepath=basepath)
-  f <- rlang::as_function(f)
-  
-  runAndArchive <- function() {
-    data <- f()
-    storeRDS(data, storeName, basepath)
-    data
-  }
-    
-  if (is.na(mostRecent)) 
-    return(runAndArchive())
 
-  if (mostRecent %--% now() < maxage)
-    return(retrieveRDS(storeName, basepath))
-
-  runAndArchive()
-}
-```
 
 ```{r, eval=F}
 if (!require("devtools")) {
@@ -122,119 +89,59 @@ devtools::install_github("weinbergerlab/ExcessILI")
 #Test12343
 ```
 
-## Download and archive the latest version of the data from NCHS
-set maxage to a small number (e.g. 24, for 24 hours) if you want to to download a recent copy of the data; otherwise it will use the most recent copy on disk in the Data/nchs_age_state folder
+Pulls in latest version of data from NCHS. can set update=F if you just want to use most local version available locally
 ```{r}
-nchs.age.state <- runIfExpired('nchs_age_state', maxage=999,
+nchs.age.state <- runIfExpired('nchs_age_state', update=F,
  ~read.csv("https://data.cdc.gov/api/views/y5bj-9g5w/rows.csv?accessType=DOWNLOAD") 
  )
 
+age1.region <- process_nchs_region(nchs.age.state)
 ```
-
-```{r}
-age1 <- nchs.age.state
-age1 <- age1[ age1$Type=='Unweighted' & age1$Suppress =='',]
-age1 <- age1[,c('Week.Ending.Date', 'Age.Group','Number.of.Deaths', 'State.Abbreviation' )]
-age1$Week.Ending.Date <- as.Date(age1$Week.Ending.Date, '%m/%d/%Y')
-
-
-#Cut off last 2 months of data--incomplete reporting
-max.date <- max(age1$Week.Ending.Date)
-age1 <- age1[age1$Week.Ending.Date<= (max.date-60),]
-
-names(age1) <-c('week_end','age_group','all_cause','state')
-age1$one <-1
-
-#age1$age_group[age1$age_group=="Under 25 years"] <- '0-25 years'
-
-
-
-age1.us <- age1[age1$state=='US' & age1$age_group %in% c('25-44 years' ,'45-64 years','65-74 years','75-84 years' ,  '85 years and older'),c('week_end','age_group', 'all_cause')]
-
-age1.us$source <- 'NCHS'
-
-
-```
-
 
 VA data
 ```{r}
-v1 <- read.csv('./Data/Confidential/va_aggdata_all.csv')
-v1$source <- 'VA'
-v1 <- v1[v1$Age.Group %in% c('25-44 years' ,'45-64 years','65-74 years','75-84 years' ,  '85 years and older'),]
-v1 <- v1[,c('Week.Ending.Date', 'Age.Group','Number.of.Deaths', 'source')]
-names(v1) <- c('week_end','age_group', 'all_cause', 'source')
-
-v1$week_end <- as.Date(v1$week_end)
-
-v1$all_cause <- as.numeric(as.character(v1$all_cause))
-
-v1$all_cause[is.na(v1$all_cause)] <- 5
-
-#some values split across multiple rows around Jan 1
-v2 <- v1 %>%
-  group_by(week_end,age_group,source) %>%
-  summarize(all_cause = sum(all_cause))
-
-v2$week_end <- v2$week_end - 1
-
+v1 <- read.csv('./Data/Confidential/aggdata_withregion.csv')
+v2 <- process_va_region(v1)
 ```
 
-Combine
+Combine NCHS and VA data
 ```{r}
 
-c1 <- bind_rows( v2 ,age1.us)
+c1 <- bind_rows( v2 ,age1.region)
 
 c1$one <- 1
 
-max.start <- max(min(v2$week_end) , min(age1.us$week_end))
-min.end <- min(max(v2$week_end) , max(age1.us$week_end))
+max.start <- max(min(v2$week_end) , min(age1.region$week_end))
+min.end <- min(max(v2$week_end) , max(age1.region$week_end))
 
 c1 <- c1[c1$week_end>=max.start & c1$week_end<=min.end,]
 
 c1 <- c1[order(c1$source, c1$age_group, c1$week_end),]
 
 c1 <- c1[c1$week_end <= '2021-01-01',]
+
+c1 <- c1[c1$region %in% c('Midwest','Northeast','South', 'West'), ]
+
 ```
 
 
-
-```{r}
-p1 <- ggplot(c1[c1$source=='NCHS',], aes(x=week_end, y=all_cause)) +
-      geom_line() +
-      ylab("Number of all-cause deaths") +
-      xlab("Date") +
-      theme_classic() +
-      theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
-      geom_hline(yintercept=0, col='gray', lty=2) +
-        facet_wrap(~age_group , scales='free', nrow=1) +
-        theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) 
-p1
-
-p2 <- ggplot(c1[c1$source=='VA',], aes(x=week_end, y=all_cause)) +
-      geom_line() +
-      ylab("Number of all-cause deaths") +
-      xlab("Date") +
-      theme_classic() +
-      theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
-      geom_hline(yintercept=0, col='gray', lty=2) +
-        facet_wrap(~age_group , scales='free', nrow=1) +
-        theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) 
-p2
-```
 
 ```{r, fig.width=12, fig.height=5}
 
+p1 <- plot_ts_region(source_data='NCHS')
+p2 <- plot_ts_region(source_data='VA')
 p2/p1
 
 
 ```
+
 Try to overlay on same plot
 
-```{r}
+```{r, fig.width=10, fig.height=10}
 
+#Scale the time series
 c1 <- c1 %>%
-  group_by(age_group, source) %>%
+  group_by(age_group, region, source) %>%
   mutate(deaths_scale = (all_cause-mean(all_cause))/sd(all_cause) ) %>%
   ungroup()
 
@@ -245,7 +152,7 @@ p3 <- ggplot(c1 ,aes(x=week_end, y=deaths_scale, group=source, col=source) )  +
       theme_classic() +
       theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
       geom_hline(yintercept=0, col='gray', lty=2) +
-        facet_wrap(~age_group , scales='free') +
+        facet_wrap(region~age_group , scales='free') +
         theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) 
 p3
 
@@ -253,115 +160,32 @@ p3
 
 ## run the model
 ```{r}
-
+ statevar = "source"
+ agevar='age_region'
+ datevar = "week_end"
+ outcome='all_cause'
+ 
+c1$age_region <- paste(c1$age_group, c1$region, sep='_')
 mod1 <- excessCases(c1, 
-             statevar = "source",
-             agevar='age_group',
-             datevar = "week_end", 
+             statevar = statevar,
+             agevar=agevar,
+             datevar = datevar, 
              use.syndromes = c("all_cause"),
             extrapolation.date = as.Date("2020-03-01"), 
             sum.dates = as.Date("2020-03-01"),
             denom.var = "one",
             extend.epiyear =TRUE,
             time.res='week',
-            model.type='negbin') 
-
-#saveRDS(mod1,'results1.rds')
+            model.type='poisson') 
 
 ```
 
 ## Interactive dashboard plot
-```{r}
 
-
+```{r, eval=F}
 app1 <-dashboardPlot(mod1)
 print(app1)
 ```
-
-## Heatmap type dashboard
-
-
-
-```{r}
- excess_output=mod1
- statevar = "source"
- agevar='age_group'
- datevar = "date"
- outcome='all_cause'
- yaxis=statevar
- facet=agevar
-  library(dplyr)
-    df_y <- excess_output %>% pluck(outcome) %>% map(~(transpose(.x) %>% 
-        map(~(.x %>% bind_rows())) %>% .[c(datevar, "y")] %>% 
-        map(~(.x %>% gather(statevar, y))) %>% bind_cols() %>% 
-        set_names(c(statevar, datevar, "rm", "y")) %>% 
-        dplyr::select(-rm))) %>% bind_rows(.id = agevar)
-    
-    df_pred <- excess_output %>% pluck(outcome) %>% map(~(transpose(.x) %>% 
-        map(~(.x %>% bind_rows())) %>% .[c(datevar, "pred")] %>% 
-        map(~(.x %>% gather(statevar, pred))) %>% bind_cols() %>% 
-        set_names(c(statevar, datevar, "rm", "pred")) %>% 
-        dplyr::select(-rm))) %>% bind_rows(.id = agevar)
-    
-    df_oe <- df_y %>% left_join(df_pred, by = c(agevar, statevar, 
-        datevar)) %>% mutate(oe = y/pred, year = year(get(datevar)), 
-        week = week(get(datevar)), oe_fac = cut(oe, breaks = c(-Inf, 
-            0.5, 0.9,1, 1.1, 1.2, 1.3, 1.4, 1.5, Inf), labels = c("0.5", '0.9',"1.0", "1.1", 
-            "1.2", "1.3", "1.4", "1.5", 
-           ">1.5")), oe_fac_rev = factor(oe_fac, 
-            levels = rev(levels(oe_fac))))
-    
-    dates <- as.Date(unique(df_oe[[datevar]]))
-    
-    states <- unique(df_oe[[statevar]])
-    
-    age_groups <- unique(df_oe[[agevar]])
-    
-    last.date <- max(dates)
-    
-    last.date.format <- format(last.date, "%b %d, %Y")
-
-    ui <- fluidPage(shiny::titlePanel(paste0("Data through ", 
-        last.date.format)), shiny::sidebarLayout(shiny::sidebarPanel(shiny::selectInput(input = "set.states", 
-        label = "State:", choice = states, selected = c("NY"),  
-        multiple = T), shiny::selectInput(input = "set.ages", 
-        label = "Age group:", choice = age_groups, selected = c("25-44 years","45-64 years","65-74 years",        "75-84 years","85 years and older"), multiple = T), 
-        shiny::sliderInput(input = "display.dates", label = "Earliest date to display", 
-            min = min(dates), max = dates[length(dates) - 2], 
-            step = 7, value = dates[length(dates) - round(length(dates)/5)])), 
-        shiny::mainPanel(shiny::plotOutput("plot"))))
-    server <- function(input, output) {
-        library(ggplot2)
-        dates_states_ages_sel <- reactive({
-            req(input$display.dates, input$set.states, input$set.ages)
-            df_oe %>% filter(get(datevar) >= input$display.dates & 
-                get(statevar) %in% c(input$set.states) & get(agevar) %in% 
-                c(input$set.ages))
-        })
-        output$plot = renderPlot({
-            ggplot(data = dates_states_ages_sel(), aes(x = factor(get(datevar)), 
-                y = get(yaxis))) + geom_raster(aes(fill = oe_fac_rev), 
-                interpolate = F) + scale_fill_manual(values = c(`>1.5` = "#67000d", 
-                  `1.5` = "#a50f15", 
-                `1.4` = "#cb181d", 
-                `1.3` = "#ef3b2c", 
-                `1.2` = "#fb6a4a", 
-                `1.1` = "#fc9272", 
-                `1.0` = "#fcbba1", 
-                `0.9` = "#fee0d2", 
-                `0.5` = "#fff5f0")) + xlab("Time") + 
-                labs(fill = "O/E Ratio") + scale_x_discrete(expand = c(0, 
-                0)) + scale_y_discrete(expand = c(0, 0)) + facet_grid(get(facet) ~ 
-                .) + theme_bw() + theme(axis.title.y = element_blank(), 
-                axis.text.x = element_text(size = 7, vjust = 1, 
-                  hjust = 0, angle = 90))
-        })
-    }
-    shiny::shinyApp(ui, server)
-
-```
-
-
 
 
 Extract output as arrays
@@ -381,6 +205,11 @@ sum.pred.iter <-
                 syndrome = 'all_cause',
                 extract.quantity = "sum.pred.iter")
 
+pred.iter <-
+    excessExtract(ds = ds,
+                syndrome = 'all_cause',
+                extract.quantity = "pred.iter")
+
 ```
 
 excess by age group and databse
@@ -396,16 +225,38 @@ rr.q <- t(apply(rr.iter,1, quantile, probs=c(0.025, 0.5, 0.975)))
 
  Sum across age groups, by database
 Print the 95% CIs for the RR (overall observed/expected deaths by state)
-```{r}
+```{r, fig.width=7, fig.height=7}
 
-pred.state.iter <- apply(sum.pred.iter,c(1,2), sum)
+#pred.state.iter <- apply(sum.pred.iter,c(1,2), sum)
 
-sum.obs.ac.state <- apply(sum.obs.ac, c(2), sum)
+sum.obs.ac.state <- apply(sum.obs.ac, c(2,3), sum)
 
-RR.state <- apply(pred.state.iter,1, function(x) sum.obs.ac.state/x)
-RR.state.q <- round(t(apply(RR.state,1,quantile, probs=c(0.025,0.5,0.975))),2)
-RR.state.q
+RR.state <- sapply(1:10000,function(x) sum.obs.ac.state/sum.pred.iter[x,,] , simplify='array')
 
+RR.state.q <- round(apply(RR.state,c(1,2),quantile, probs=c(0.025,0.5,0.975)),2)
+
+dimnames(RR.state.q)[[2]] <- dimnames(sum.obs.ac.state)[[1]]
+dimnames(RR.state.q)[[3]] <- dimnames(sum.obs.ac.state)[[2]]
+
+
+RR.state.q.m <- melt(RR.state.q)
+RR.state.q.c <- dcast(RR.state.q.m, Var2+Var3 ~ Var1)
+
+names(RR.state.q.c)[1:2] <- c('source', 'age_region') 
+
+lab1 <- as.data.frame(matrix(unlist(str_split(RR.state.q.c$age_region, fixed("_"))), ncol=2, byrow=T))
+names(lab1) <- c('age_group', 'region')
+  
+RR.state.q.c <- cbind.data.frame(RR.state.q.c, lab1)
+
+p1 <-ggplot(RR.state.q.c, aes( y=`50%`, x=age_group, group=source, col=source)) + 
+  geom_point(position = position_dodge(0.3))+
+  geom_errorbar(aes(ymin=`2.5%`, ymax=`97.5%`), width=0, position = position_dodge(0.3)) +
+  theme_classic() +
+      theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
+      geom_hline(yintercept=1, col='gray', lty=2) +
+      facet_wrap(~region ) 
+p1
 ```
 
 
@@ -413,12 +264,11 @@ RR.state.q
 ```{r}
 excess_output = mod1
             statevar = "source"
-             agevar='age_group'
+             agevar='age_region'
              datevar = "date" 
              outcome='all_cause' 
              yaxis=statevar
              facet=agevar
-
 
   df_y <- 
     excess_output  %>% 
@@ -439,18 +289,13 @@ excess_output = mod1
 rr_time_series
 ```{r}
 
-rr.ls <- lapply(mod1[[1]] , function(x){
-rr.nchs <- x$NCHS$y/x$NCHS$pred 
-rr.va <- x$VA$y/x$VA$pred 
-date <- x$NCHS$date
-cbind.data.frame(date, rr.nchs, rr.va, age_group=)
+rr.ls <- lapply(names(mod1[[1]]) , function(x){
+  ds <- mod1[[1]][[x]]
+  rr.nchs <- ds$NCHS$y/ds$NCHS$pred 
+  rr.va <- ds$VA$y/ds$VA$pred 
+  date <- ds$NCHS$date
+  return(cbind.data.frame(date, rr.nchs, rr.va, 'age_group'=x))
 })
-
-rr.ls <- lapply(names(rr.ls) , function(x) {
-  rr.ls[[x]]$age_group=x 
-  return(rr.ls[[x]])
-  }
-  )
 
 rr <- bind_rows(rr.ls)
 rr <- rr[rr$date>='2019-01-01',]
@@ -546,15 +391,18 @@ filled_pop2 <- filled_pop2[,c('age_group','state','week_end','pop.interpol')]
 # plot(test1$week_end, test1$pop.interpol)
 ```
 
-## Set up data for multilevel model
+## Set up data for INLA model
 
 ```{r}
 
-ag3 <- readRDS('./Data/cleaned_file.rds')
+ag3 <- c1
 
-ag3 <- ag3[ag3$state!='US',]
+ag3 <- ag3 %>%
+  group_by(region, age_group , source) %>%
+  arrange(week_end) %>%
+  mutate( time= row_number()) %>%
+  ungroup()
 
-ag3$time <- 1:length(unique(ag3$week_end))
 ag3$sin1 <- sin(2*pi*ag3$time/52.1775)
 ag3$sin2 <- sin(2*pi*ag3$time*2/52.1775)
 ag3$sin3 <- sin(2*pi*ag3$time*3/52.1775)
@@ -564,59 +412,181 @@ ag3$cos2 <- cos(2*pi*ag3$time*2/52.1775)
 ag3$cos3 <- cos(2*pi*ag3$time*3/52.1775)
  
 ag3$age_group <- as.factor(ag3$age_group)
-ag3$state <- as.factor(ag3$state)
+
+ag3$region <- as.factor(ag3$region)
 
 #mod.inla <- inla(all_cause ~  , family='poisson')
 
 ag3$all_cause_pre <- ag3$all_cause
 
 ag3$all_cause_pre[ag3$week_end >= '2020-03-01'] <- NA
-ag3$time_scale <- as.vector(scale(ag3$time))
 
-# ag3.pre <- ag3[ag3$week_end < '2020-03-01',] %>%
-#   group_by(state,age_group) %>%
-#   summarize( log.ave.case = log(mean(all_cause)  ))
-  
-#ag3 <- merge( ag3, ag3.pre, by=c('state','age_group'))
+ag3$time_scale <- as.vector(scale(ag3$time))
 
 ag3$year <- year(ag3$week_end)
 ag3$weekN <- week(ag3$week_end)
 
+#ag3 <- merge(ag3, filled_pop2, by=c('state','age_group', 'week_end'), all.x=T)
 
-ag3 <- merge(ag3, filled_pop2, by=c('state','age_group', 'week_end'), all.x=T)
 
+#ag3$log_pop <- log(ag3$pop.interpol)
 
-ag3$log_pop <- log(ag3$pop.interpol)
-
-ag3$state_ag_combo <- as.factor(paste(ag3$state, ag3$age_group))
-ag3$state_ag_combo2 <- ag3$state_ag_combo
-ag3$state_ag_combo3 <- ag3$state_ag_combo
+# ag3$state_ag_combo <- as.factor(paste(ag3$state, ag3$age_group))
+# ag3$state_ag_combo2 <- ag3$state_ag_combo
+# ag3$state_ag_combo3 <- ag3$state_ag_combo
 
 ag3$age_group2 <- ag3$age_group
 ag3$age_group3 <- ag3$age_group
 
-ag3$state2 <- ag3$state
-ag3$state3 <- ag3$state
+# ag3$state2 <- ag3$state
+# ag3$state3 <- ag3$state
 
-ag3 <- ag3[!is.na(ag3$pop.interpol),]
+ag3$quarter <- quarter(ag3$week_end)
+ag3$age_region_source <- paste(ag3$region, ag3$age_group, ag3$source, sep='_')
+
+#ag3 <- ag3[!is.na(ag3$pop.interpol),]
+
 #ag3 <- ag3[ag3$year<=2020,]
 ```
 
+
+## Simple GLM, in INLA. Fit separately by group
+Need to use Negbin, otherwise it fails on some groups with Poisson
+```{r}
+nCores <- detectCores() - 1
+set.seed(123)
+cl1 <-makeCluster(nCores)
+clusterExport(cl1, c('inla_mod_group', 'inla','inla.posterior.sample'), environment())
+clusterEvalQ(cl1,  library(dplyr))
+clusterEvalQ(cl1,  library(reshape2))
+
+  mod1 <- parLapply(cl=cl1,unique(ag3$age_region_source), inla_mod_group , ds.in=ag3)
+stopCluster(cl1)
+
+
+preds_total <- bind_rows(lapply(mod1,'[[','preds_total' ))
+preds_total_qtr <- bind_rows(lapply(mod1,'[[','preds_qtr' ))
+preds_total_wk <- bind_rows(lapply(mod1,'[[','preds_week' ))
+
+#Splits out the labels we need and add as column
+lab_split <- function(ds, var_to_split){
+  ds <- ds%>%
+    mutate(region = sapply(strsplit(as.character(ds[,var_to_split]), "_"),"[", 1),
+           age_group= sapply(strsplit(as.character(ds[,var_to_split]), "_"),"[", 2), 
+           source =sapply(strsplit(as.character(ds[,var_to_split]), "_"),"[", 3))
+  return(ds)
+}
+
+preds_total_wk <- lab_split(preds_total_wk, 'age_region_source')
+preds_total_qtr <- lab_split(preds_total_qtr, 'age_region_source')
+preds_total <- lab_split(preds_total, 'age_region_source')
+
+
+```
+
+
+
+```{r, fig.width=15, fig.height=10}
+
+plot_ts_region <- function( source_data='NCHS'){
+  
+  p1 <- ggplot(preds_total_wk[preds_total_wk$source==source_data,], aes(x=week_end, y=all_cause, group=region, col=region)) +
+    geom_line() +
+    geom_ribbon(aes(ymin=pred_lcl, ymax=pred_ucl), alpha=0.2, col='gray') +
+    ylab("Number of all-cause deaths") +
+    xlab("Date") +
+    theme_classic() +
+    theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
+    geom_hline(yintercept=0, col='gray', lty=2) +
+    facet_wrap(region~age_group , scales='free') +
+    theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) 
+  return(p1)
+}
+p1 <- plot_ts_region('NCHS')
+p2 <- plot_ts_region('VA')
+
+p1
+p2
+```
+Zoom in on 2020
+
+```{r, fig.width=15, fig.height=10}
+
+plot_ts_region <- function( source_data='NCHS'){
+  
+  p1 <- ggplot(preds_total_wk[preds_total_wk$source==source_data,], aes(x=week_end, y=all_cause, group=region, col=region)) +
+    geom_line() +
+    geom_ribbon(aes(ymin=pred_lcl, ymax=pred_ucl), alpha=0.2, col='gray') +
+    ylab("Number of all-cause deaths") +
+    xlab("Date") +
+    theme_classic() +
+    theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
+    geom_hline(yintercept=0, col='gray', lty=2) +
+    geom_vline(xintercept=as.Date('2020-03-01'), col='gray', lty=2) +
+
+        facet_wrap(region~age_group , scales='free') +
+    xlim(as.Date('2020-01-01'), as.Date('2020-12-31')) +
+    theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) 
+  return(p1)
+}
+p1 <- plot_ts_region('NCHS')
+p2 <- plot_ts_region('VA')
+
+p1
+p2
+```
+
+#Time series RR
+
+```{r, fig.width=15, fig.height=10}
+
+preds_total_wk$RR <- preds_total_wk$all_cause/preds_total_wk$pred_mean
+preds_total_wk$RR.lcl <- preds_total_wk$all_cause/preds_total_wk$pred_lcl
+preds_total_wk$RR.ucl <- preds_total_wk$all_cause/preds_total_wk$pred_ucl
+
+  p3 <- ggplot(preds_total_wk, aes(x=week_end, y=RR, group=source,col=source)) +
+    geom_line() +
+   # geom_line(data=preds_total_wk[preds_total_wk$source=='VA',]) +
+    geom_ribbon(aes(ymin=RR.lcl, ymax=RR.ucl, fill=source), alpha=0.2, col=NA) +
+    ylab("Number of all-cause deaths") +
+    xlab("Date") +
+    theme_classic() +
+    theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
+    geom_hline(yintercept=1, col='gray', lty=2) +
+    geom_vline(xintercept=as.Date('2020-03-01'), col='gray', lty=2) +
+
+        facet_wrap(region~age_group , scales='free') +
+    xlim(as.Date('2020-01-01'), as.Date('2020-12-31')) +
+    theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) 
+p3
+
+```
+
+RRs
+```{r, fig.width==7, fig.height=7}
+preds_total$RR_mean <- preds_total$all_cause/preds_total$pred_mean
+preds_total$RR_lcl <- preds_total$all_cause/preds_total$pred_lcl
+preds_total$RR_ucl <- preds_total$all_cause/preds_total$pred_ucl
+
+
+p2 <-ggplot(preds_total, aes( y=RR_mean, x=age_group, group=source, col=source)) + 
+  geom_point(position = position_dodge(0.3))+
+  geom_errorbar(aes(ymin=RR_lcl, ymax=RR_ucl), width=0, position = position_dodge(0.3)) +
+  theme_classic() +
+      theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
+      geom_hline(yintercept=1, col='gray', lty=2) +
+      facet_wrap(~region ) 
+p2
+```
+
+
+
+
+
+
 ## Multilevel model
 
-Simple GLM
-```{r}
-mod.glm1 <- glm(all_cause_pre ~ 
-                1 + time_scale + sin1 + sin2 + sin3 + cos1 +cos2+ cos3 +
-                  age_group + state + state_ag_combo +
-                  age_group*(time_scale + sin1 + sin2 + sin3 + cos1 +cos2+ cos3) +
-                  state*(time_scale + sin1 + sin2 + sin3 + cos1 +cos2+ cos3),#+
-                      #state*(time_scale+ sin1 + sin2 + sin3 + cos1 +cos2+ cos3) +
-                     # age_group*(time_scale + sin1 + sin2 + sin3 + cos1 +cos2+ cos3) ,
-                offset = log_pop,
-                family='poisson', data=ag3)
-summary(mod.glm1)
-```
+
 
 
 Model fit takes about 1 min
