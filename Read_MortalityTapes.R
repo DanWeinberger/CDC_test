@@ -48,17 +48,25 @@ df1$race_recode[ df1$race %in% c('03') ]  <- 3 #American Indian
 df1$race_recode[ df1$race %in% c('04','05','18','28','48' ,'68','78')]  <- 4 #Asian
 df1$race_recode[ df1$race %in% c( '06','07','38','58')]  <- 5 #Hawaain/Pac Is
 
+
+df1$qtr <- NA
+df1$qtr[df1$month %in% c('01','02','03')] <- 1
+df1$qtr[df1$month %in% c('04','05','06')] <- 2
+df1$qtr[df1$month %in% c('07','08','09')] <- 3
+df1$qtr[df1$month %in% c('10','11','12')] <- 4
+
+
 #table(df1$race_ethnicity)
   
 #Create aggregate time series for analysis
 agg1 <- df1 %>%
   bind_rows() %>% 
-  group_by(month, year, sex, agec,race_recode) %>%
+  group_by(year, qtr, sex, agec,race_recode) %>%
   summarize(N_deaths = n())  %>%
   ungroup  %>%
-  complete(month, year, sex, agec,race_recode, fill=list(N_deaths=0)) #fills 0s
+  complete(year,qtr, sex, agec,race_recode, fill=list(N_deaths=0)) #fills 0s
 
-saveRDS(agg1,'./Data/Confidential/compiled_sex_age_race.rds')
+saveRDS(agg1,'./Data/Confidential/compiled_sex_age_race_qtr.rds')
 
 
 ## Cause specific deaths
