@@ -250,7 +250,7 @@ ag3 <- merge(ag3, filled_pop2, by.x=c('sex','race_recode','agec', 'date'),by.y=c
 
 ag3$log_pop <- log(ag3$pop.interpol)
 
-ag3$subgroup_combo <- as.factor(paste(ag3$race_recode, ag3$agec))
+ag3$subgroup_combo <- as.factor(paste(ag3$race_recode, ag3$agec, ag3$sex))
 ag3$subgroup_combo2 <- ag3$subgroup_combo
 ag3$subgroup_combo3 <- ag3$subgroup_combo
 ag3$subgroup_combo4 <- ag3$subgroup_combo
@@ -299,7 +299,7 @@ mod.inla2 <- inla(all_cause_pre ~
                 1 + time_scale +qtr2 + qtr3 +qtr4 +
                   agec + race_recode + sex + 
 
-                #Random slopes for the time trends and sin1, cos1 effects
+                #Random slopes for the time trends and sin1, cos1 effects--ideally would have these vary by age; then by race; then by sex and also have an effect allowing the subgroups to vary
                 f(subgroup_combo ,model='iid') +
                 f(subgroup_combo2, time_scale,model='iid') +
                 f(subgroup_combo3, qtr2,model='iid') +
@@ -332,6 +332,7 @@ preds.age <- preds.inla2$preds_covars.m %>%
 
  p1 <- ggplot(preds.age, aes(x=date, y=N_deaths , group=agec, col=agec)) +
     geom_line() +
+    geom_line(aes(x=date, y=pred_median, group=agec), lty=2, col='black') +
     geom_ribbon(aes(ymin=pred_lcl, ymax=pred_ucl), alpha=0.2, col='gray') +
     ylab("Number of all-cause deaths") +
     xlab("Date") +
