@@ -325,26 +325,28 @@ summary(mod.inla2)
 preds.inla2 <- gen_pred_interval_inla(mod.inla2, ag3)
 
 
-# test.mod <- inla(all_cause_pre ~ 
+# prec.prior <- list(prec = list(param = c(0.001, 0.001)))
+# 
+# test.mod <- inla(all_cause_pre ~
 #               1 + time_scale + qtr2 + qtr3 +qtr4 +
 #                     sex  +
-#                 f(agec, model='iid') +
-#                 f(agec2, time_scale, model='iid') +
-#                 f(agec3, qtr2, model='iid') +
-#                 f(agec4, qtr3, model='iid') +            
-#                 f(agec5, qtr4, model='iid') +    
-#                 
-#                 f(race_recode, model='iid') +
-#                 f(race_recode2, time_scale, model='iid') +
-#                 f(race_recode3, qtr2, model='iid') +
-#                 f(race_recode4, qtr3, model='iid') +            
-#                 f(race_recode5, qtr4, model='iid')  
+#                 f(agec, model='iid',constr = FALSE,hyper = prec.prior) +
+#                 f(agec2, time_scale, model='iid', hyper = prec.prior) +
+#                  f(agec3, qtr2, model='iid',hyper = prec.prior) +
+#                  f(agec4, qtr3, model='iid', hyper = prec.prior) +
+#                  f(agec5, qtr4, model='iid', hyper = prec.prior) 
+# 
+#                 # f(race_recode, model='iid',scale.model = TRUE, hyper = prec.prior) +
+#                 # f(race_recode2, time_scale, model='iid',scale.model = TRUE, hyper = prec.prior) +
+#                 # f(race_recode3, qtr2, model='iid',scale.model = TRUE, hyper = prec.prior) +
+#                 # f(race_recode4, qtr3, model='iid',scale.model = TRUE, hyper = prec.prior) +
+#                 # f(race_recode5, qtr4, model='iid',scale.model = TRUE, hyper = prec.prior) +
 #                 # 
-#                 # f(subgroup_combo, model='iid') +
-#                 # f(subgroup_combo2, time_scale, model='iid') +
-#                 # f(subgroup_combo3, qtr2, model='iid') +
-#                 # f(subgroup_combo4, qtr3, model='iid') +            
-#                 # f(subgroup_combo5, qtr4, model='iid')   
+#                 # f(subgroup_combo, model='iid',scale.model = TRUE, hyper = prec.prior) +
+#                 # f(subgroup_combo2, time_scale, model='iid',scale.model = TRUE, hyper = prec.prior) +
+#                 # f(subgroup_combo3, qtr2, model='iid',scale.model = TRUE, hyper = prec.prior) +
+#                 # f(subgroup_combo4, qtr3, model='iid',scale.model = TRUE, hyper = prec.prior) +
+#                 # f(subgroup_combo5, qtr4, model='iid',scale.model = TRUE, hyper = prec.prior)
 # 
 #               ,
 #                                 offset = log_pop,
@@ -355,6 +357,8 @@ preds.inla2 <- gen_pred_interval_inla(mod.inla2, ag3)
 
 
 ```
+
+
 
 We can then take the results from the INLA and aggregate over different groups. For example, by age:
 ```{r}
