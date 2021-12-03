@@ -258,9 +258,13 @@ ag3$subgroup_combo5 <- ag3$subgroup_combo
 
 ag3$agec2 <- ag3$agec
 ag3$agec3 <- ag3$agec
+ag3$agec4 <- ag3$agec
+ag3$agec5 <- ag3$agec
 
 ag3$race_recode2 <- ag3$race_recode
 ag3$race_recode3 <- ag3$race_recode
+ag3$race_recode4 <- ag3$race_recode
+ag3$race_recode5 <- ag3$race_recode
 
 ag3$sex2 <- ag3$sex
 ag3$sex3 <- ag3$sex
@@ -306,7 +310,7 @@ mod.lme42 <- stan_glmer(all_cause_pre ~
 Model fit takes about 1 min
 ```{r}
 
-mod.inla2 <- inla(all_cause_pre ~ 
+mod.inla2 <- inla(all_cause_pre ~
               1 + time_scale + qtr2 + qtr3 +qtr4 +
                   agec + race_recode + sex + subgroup_combo +
                   agec*(time_scale + qtr2 + qtr3 +qtr4) +
@@ -319,6 +323,37 @@ summary(mod.inla2)
 
 
 preds.inla2 <- gen_pred_interval_inla(mod.inla2, ag3)
+
+
+# test.mod <- inla(all_cause_pre ~ 
+#               1 + time_scale + qtr2 + qtr3 +qtr4 +
+#                     sex  +
+#                 f(agec, model='iid') +
+#                 f(agec2, time_scale, model='iid') +
+#                 f(agec3, qtr2, model='iid') +
+#                 f(agec4, qtr3, model='iid') +            
+#                 f(agec5, qtr4, model='iid') +    
+#                 
+#                 f(race_recode, model='iid') +
+#                 f(race_recode2, time_scale, model='iid') +
+#                 f(race_recode3, qtr2, model='iid') +
+#                 f(race_recode4, qtr3, model='iid') +            
+#                 f(race_recode5, qtr4, model='iid')  
+#                 # 
+#                 # f(subgroup_combo, model='iid') +
+#                 # f(subgroup_combo2, time_scale, model='iid') +
+#                 # f(subgroup_combo3, qtr2, model='iid') +
+#                 # f(subgroup_combo4, qtr3, model='iid') +            
+#                 # f(subgroup_combo5, qtr4, model='iid')   
+# 
+#               ,
+#                                 offset = log_pop,
+#                 family='nbinomial', data=ag3,
+#                 control.compute=list(config = TRUE))
+# preds.inla2 <- gen_pred_interval_inla(test.mod, ag3)
+
+
+
 ```
 
 We can then take the results from the INLA and aggregate over different groups. For example, by age:
