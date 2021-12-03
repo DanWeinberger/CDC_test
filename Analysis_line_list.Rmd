@@ -290,6 +290,17 @@ mod.glm1 <- glm(all_cause_pre ~
                 family='poisson', data=ag3)
 summary(mod.glm1)
 ```
+```{r}
+library(rstanarm)
+
+mod.lme42 <- stan_glmer(all_cause_pre ~ 
+                1 + time_scale +qtr2 + qtr3 +qtr4 +
+                   sex  +(1+time_scale +qtr2 + qtr3 +qtr4|agec) + (1+time_scale +qtr2 + qtr3 +qtr4|race_recode), 
+                offset = log_pop,
+                data=ag3,
+                family='poisson')
+
+```
 
 
 Model fit takes about 1 min
