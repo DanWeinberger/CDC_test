@@ -307,16 +307,11 @@ Model fit takes about 1 min
 ```{r}
 
 mod.inla2 <- inla(all_cause_pre ~ 
-                1 + time_scale +qtr2 + qtr3 +qtr4 +
-                  agec + race_recode + sex + 
-
-                #Random slopes for the time trends and sin1, cos1 effects--ideally would have these vary by age; then by race; then by sex and also have an effect allowing the subgroups to vary
-                f(subgroup_combo ,model='iid') +
-                f(subgroup_combo2, time_scale,model='iid') +
-                f(subgroup_combo3, qtr2,model='iid') +
-                f(subgroup_combo4, qtr3,model='iid') +
-                f(subgroup_combo5, qtr4,model='iid') 
-                                      ,
+              1 + time_scale + qtr2 + qtr3 +qtr4 +
+                  agec + race_recode + sex + subgroup_combo +
+                  agec*(time_scale + qtr2 + qtr3 +qtr4) +
+                  race_recode*(time_scale + qtr2 + qtr3 +qtr4)  +
+                  sex*(time_scale + qtr2 + qtr3 +qtr4)                                       ,
                                 offset = log_pop,
                 family='nbinomial', data=ag3,
                 control.compute=list(config = TRUE))
