@@ -65,6 +65,7 @@ library(RSocrata)
 library(pdftools)
 library(readr)
 library(abind)
+library(pbapply)
 library(gsubfn)
 library(dplyr)
 library(RCurl)
@@ -135,22 +136,28 @@ pop1$sex2[pop1$SEX==1] <- 'M'
 pop1$sex2[pop1$SEX==2]  <- 'F'
 pop1$sex2[pop1$SEX==0]  <- 'ALL'
 
+pop1$state.abb1 <- state.abb[match(pop1$NAME,state.name)]
+pop1$state.abb1[pop1$NAME=='District of Columbia'] <- 'DC'
+
+pop1$region <- NA
+  pop1$region[pop1$state.abb1 %in% c('ME','VT','NH','MA','CT','RI','NY','NJ','PA')] <- 'Northeast'
+  pop1$region[pop1$state.abb1 %in% c('DE','DC','FL','GA','MD','NC','SC','VA','WV','AL','MS','KY','TN','AK','LA','OK','TX')] <- 'South'
+  pop1$region[pop1$state.abb1 %in% c('AZ','CA','ID','NM','MT','UT','WY','NV','AK','CA','HI','OR','WA')] <- 'West'
+  pop1$region[pop1$state.abb1 %in% c('IN','IL','MI','OH','WI','IA','KS','MN','MO','NE','ND','SD')] <- 'Midwest'
+  
 
 
-#pop1$state2 <- state.abb[match(pop1$NAME,state.name)]
-#pop1$state2[pop1$NAME=='District of Columbia'] <- 'DC'
+pop1.m <- reshape2::melt(pop1[ pop1$ORIGIN==0 ,c('agec','region','RACE','sex2',"POPESTIMATE2010", "POPESTIMATE2011", "POPESTIMATE2012", "POPESTIMATE2013",  "POPESTIMATE2014", "POPESTIMATE2015", "POPESTIMATE2016", "POPESTIMATE2017", "POPESTIMATE2018", "POPESTIMATE2019" , "POPESTIMATE2020" )], id.vars=c('agec','sex2', 'RACE','region'))
 
-pop1.m <- reshape2::melt(pop1[ pop1$ORIGIN==0 ,c('agec','RACE','sex2',"POPESTIMATE2010", "POPESTIMATE2011", "POPESTIMATE2012", "POPESTIMATE2013",  "POPESTIMATE2014", "POPESTIMATE2015", "POPESTIMATE2016", "POPESTIMATE2017", "POPESTIMATE2018", "POPESTIMATE2019" , "POPESTIMATE2020" )], id.vars=c('agec','sex2', 'RACE'))
-
-pop2 <- reshape2::dcast(pop1.m, agec + sex2 +RACE + variable ~., fun.aggregate = sum)
+pop2 <- reshape2::dcast(pop1.m, agec + sex2 +RACE +region+ variable ~., fun.aggregate = sum)
 
 pop2$year <- as.numeric(gsub( 'POPESTIMATE','',as.character(pop2$variable)))
 
-names(pop2) <- c('agec','SEX','RACE','variable','popsize','year')
+names(pop2) <- c('agec','SEX','RACE','region','variable','popsize','year')
 
-pop2 <- pop2[,c('agec','SEX','RACE','popsize','year')]
+pop2 <- pop2[,c('agec','SEX','RACE','region','popsize','year')]
 
-pop2$month <- 7 #July 1
+pop2$qtr <- 1 #July 1
 
 #pop2 <- pop2[pop2$state !='US',]
 
@@ -160,9 +167,9 @@ pop2$month <- 7 #July 1
 # 
 # pop2 <- bind_rows(pop2, fill_2021)
 
-empty_ts <- readRDS('./Data/Confidential/compiled_sex_age_race.rds')
-empty_ts <- empty_ts[,c('agec','sex','race_recode','year','month')]
-names(empty_ts) <- c('agec','sex','race','year','month')
+empty_ts <- readRDS('./Data/Confidential/compiled_sex_age_race_qtr_region.rds')
+empty_ts <- empty_ts[,c('agec','sex','region','race_recode','year','qtr')]
+names(empty_ts) <- c('agec','sex','region','race','year','qtr')
   
 names(pop2) <- tolower(names(pop2))
 
@@ -173,12 +180,19 @@ pop2 <- pop2[pop2$sex !='ALL',]
 empty_ts <- empty_ts[empty_ts$agec !='12',]
 
 
-empty_ts$month <- as.numeric(empty_ts$month)
+empty_ts$qtr <- as.numeric(empty_ts$qtr)
 
-empty_ts2 <- merge(empty_ts, pop2, by=c('agec','sex','race','year','month'), all=T)
+empty_ts2 <- merge(empty_ts, pop2, by=c('agec','sex','race','region','year','qtr'), all=T)
 
-empty_ts2$date <- as.Date(paste(empty_ts2$year, empty_ts2$month, '01', sep='-'), '%Y-%m-%d')
+empty_ts2$date[empty_ts2$qtr==3] <- (paste(empty_ts2$year[empty_ts2$qtr==3] ,'07','01', sep='-'))
 
+empty_ts2$date[empty_ts2$qtr==4] <- (paste(empty_ts2$year[empty_ts2$qtr==4] ,'10','01', sep='-'))
+
+empty_ts2$date[empty_ts2$qtr==1] <- (paste(empty_ts2$year[empty_ts2$qtr==1] ,'01','01', sep='-'))
+
+empty_ts2$date[empty_ts2$qtr==2] <- (paste(empty_ts2$year[empty_ts2$qtr==2] ,'04','01', sep='-'))
+
+empty_ts2$date <- as.Date(empty_ts2$date)
 empty_ts2 <- empty_ts2[empty_ts2$date>='2014-07-01' ,] #UPDATE THIS!
 
 empty_ts2 <- empty_ts2[empty_ts2$race !=6,]
@@ -186,13 +200,13 @@ empty_ts2 <- empty_ts2[empty_ts2$race !=6,]
 
 
 filled_pop2 <- empty_ts2 %>%
-      group_by(agec , sex,race) %>%
-      arrange(agec , sex,race,year, month) %>%
+      group_by(agec , sex,race, region) %>%
+      arrange(agec , sex,race,region,year, qtr) %>%
           mutate(time=seq(1,n())) %>%
            mutate(pop.interpol=approx(time,popsize,time)$y)
 
 
-filled_pop2 <- filled_pop2[,c('agec','sex','race','date','pop.interpol')]
+filled_pop2 <- filled_pop2[,c('agec','sex','race','region','date','pop.interpol')]
 
 # test1 <- filled_pop2[filled_pop2$state=='NY' & filled_pop2$age_group=="75-84 years",]
 # plot(test1$week_end, test1$pop.interpol)
@@ -202,7 +216,7 @@ filled_pop2 <- filled_pop2[,c('agec','sex','race','date','pop.interpol')]
 
 ```{r}
 
-ag3 <- readRDS('./Data/Confidential/compiled_sex_age_race_qtr.rds')
+ag3 <- readRDS('./Data/Confidential/compiled_sex_age_race_qtr_region.rds')
 ag3$month <- NA
 ag3$month[ag3$qtr==1] <- 1
 ag3$month[ag3$qtr==2] <- 4
@@ -245,12 +259,12 @@ ag3$time_scale <- as.vector(scale(ag3$time))
 
 
 
-ag3 <- merge(ag3, filled_pop2, by.x=c('sex','race_recode','agec', 'date'),by.y=c('sex','race','agec', 'date'), all.x=T)
+ag3 <- merge(ag3, filled_pop2, by.x=c('sex','race_recode','agec','region', 'date'),by.y=c('sex','race','agec','region' ,'date'), all.x=T)
 
 
-ag3$log_pop <- log(ag3$pop.interpol)
+ag3$log_pop <- log(ag3$pop.interpol/100000)
 
-ag3$subgroup_combo <- as.factor(paste(ag3$race_recode, ag3$agec, ag3$sex))
+ag3$subgroup_combo <- as.factor(paste(ag3$race_recode, ag3$agec, ag3$sex,ag3$region))
 ag3$subgroup_combo2 <- ag3$subgroup_combo
 ag3$subgroup_combo3 <- ag3$subgroup_combo
 ag3$subgroup_combo4 <- ag3$subgroup_combo
@@ -276,6 +290,8 @@ ag3 <- ag3[!is.na(ag3$pop.interpol),]
 
 ag3$obs <- as.factor(1:nrow(ag3))
 
+ag3$region <- as.factor(ag3$region)
+
 #ag3 <- ag3[ag3$year<=2020,]
 ```
 
@@ -285,9 +301,11 @@ Simple GLM
 ```{r}
 mod.glm1 <- glm(all_cause_pre ~ 
                 1 + time_scale + qtr2 + qtr3 +qtr4 +
-                  agec + race_recode + sex + subgroup_combo +
+                  agec + race_recode + sex + region + subgroup_combo +
                   agec*(time_scale + qtr2 + qtr3 +qtr4) +
-                  race_recode*(time_scale + qtr2 + qtr3 +qtr4)  
+                  race_recode*(time_scale + qtr2 + qtr3 +qtr4) +
+                  region*(time_scale + qtr2 + qtr3 +qtr4)  +
+                  subgroup_combo*(time_scale + qtr2 + qtr3 +qtr4)
                   #sex*(time_scale + sin1 + sin2 + sin3 + cos1 +cos2+ cos3) + 
                      ,
                 offset = log_pop,
@@ -309,16 +327,50 @@ mod.lme42 <- stan_glmer(all_cause_pre ~
 
 Model fit takes about 1 min
 ```{r}
+#RIDGE REGRESSION
 
-mod.inla2 <- inla(all_cause_pre ~
+X <- model.matrix(~
               1 + time_scale + qtr2 + qtr3 +qtr4 +
                   agec + race_recode + sex + subgroup_combo +
                   agec*(time_scale + qtr2 + qtr3 +qtr4) +
-                  race_recode*(time_scale + qtr2 + qtr3 +qtr4)  +
-                  sex*(time_scale + qtr2 + qtr3 +qtr4)                                       ,
-                                offset = log_pop,
-                family='nbinomial', data=ag3,
-                control.compute=list(config = TRUE))
+                  race_recode*(time_scale )  +
+                #  sex*(time_scale + qtr2 + qtr3 +qtr4) +
+                  region*(time_scale + qtr2 + qtr3 +qtr4)  + 
+              subgroup_combo*(time_scale + qtr2 + qtr3 +qtr4)     
+,
+                                 data=ag3)
+
+ first.beta<-paste0("f(beta1,", names(X)[1], ",model='iid',hyper = param.beta,", "values=c(", paste(1:ncol(X), collapse=',') ,"))" )
+ 
+    next.beta.f<-function( covar.index, Xnames){ 
+      paste0("f(beta",covar.index, names(X[-1])[covar.index], ",copy='beta1', fixed=T)")
+    }
+        betas.list<- pbmapply(covar.index=2:ncol(X), Xnames=colnames(X)[-1],next.beta.f,SIMPLIFY=T)
+
+    next.betas<- paste(betas.list, collapse='+')  
+    all.betas<-paste(first.beta,next.betas , sep='+')   
+
+          form1<- as.formula(paste0("all_cause_pre ~",  all.betas    ) )
+          
+           mod1.full = inla(form1, data = mod.df.full, 
+                     control.predictor = list(compute=TRUE, link = 1), offset = ag3$log_pop,
+                     family='nbinomial')
+
+# 
+# mod.inla2 <- inla(all_cause_pre ~
+#               1 + time_scale + qtr2 + qtr3 +qtr4 +
+#                   agec + race_recode + sex + subgroup_combo +
+#                   agec*(time_scale + qtr2 + qtr3 +qtr4) +
+#                   race_recode*(time_scale + qtr2 + qtr3 +qtr4)  +
+#                   sex*(time_scale + qtr2 + qtr3 +qtr4) +
+#                 region*(time_scale + qtr2 + qtr3 +qtr4)  + 
+#               subgroup_combo*(time_scale + qtr2 + qtr3 +qtr4)     
+# ,
+#                                 offset = log_pop,
+# 
+#                 family='nbinomial', data=ag3,
+#                 control.fixed=priors,
+#                 control.compute=list(config = TRUE))
 summary(mod.inla2)
 
 

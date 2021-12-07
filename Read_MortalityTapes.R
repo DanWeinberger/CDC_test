@@ -11,22 +11,22 @@ library(ggplot2)
 
 
 #https://www.cdc.gov/nchs/data_access/vitalstatsonline.htm
-# file.names1<- list('VS14MORT.DUSMCPUB', 'VS15MORT.DUSMCPUB','VS16MORT.DUSMCPUB','VS17MORT.DUSMCPUB',
-#              'Mort2018US.PubUse.txt','VS19MORT.DUSMCPUB_r20210304')
+# file.names1<- list('MULT2014.USAllCnty.txt', 'MULT2015.USAllCnty.txt','MULT2016.USAllCnty.txt','MULT2017.USAllCnty.txt',
+#              'Mort2018US.AllCnty.txt','MULT2019US.AllCnty.txt')
 # 
 # all.ds <- lapply(file.names1, function(x){
-#   d1 <- read_fwf(file=paste0("./CDC_tapes/" ,x),
-#                  fwf_positions(start=c(20,21,65,69,102,445,70,71, 79,484,146,167,174,181,188,195,202,209,216,223,230,237,244,251,258,265,272,279,286,293,300),
-#                                end=c(20,34,66,69,105,446,  70,73, 80,486,149, 171,178,185,192,199,206,213,220,227,234,241,248,255,262,269,276,283,290,297,304),
-#                                col_names = c('res_status','state','month','sex','year','race','age_detail_class','age_detail_number','agec','hispanic', paste0('icd', 1:21 ) )),
+#   d1 <- read_fwf(file=paste0("./CDC_tapes/CONFIDENTIAL/extracted/" ,x),
+#                  fwf_positions(start=c(20,21,23,65,69,102,445,70,71, 79,484,146,167,174,181,188,195,202,209,216,223,230,237,244,251,258,265,272,279,286,293,300),
+#                                end=c(  20,22,25,66,69,105,446,  70,73, 80,486,149, 171,178,185,192,199,206,213,220,227,234,241,248,255,262,269,276,283,290,297,304),
+#                                col_names = c('res_status','state','county','month','sex','year','race','age_detail_class','age_detail_number','agec','hispanic', paste0('icd', 1:21 ) )),
 #                   guess_max=10000)
 #   return(d1)
 # })
 # 
 # df1 <- bind_rows(all.ds)
-# saveRDS(df1, './CDC_tapes/compiled_data.rds')
+# saveRDS(df1, './CDC_tapes/compiled_data_county.rds')
 
-df1 <- readRDS('./CDC_tapes/compiled_data.rds')
+df1 <- readRDS('./CDC_tapes/compiled_data_county.rds')
 
 df1$hisp_recode <- 999
 df1$hisp_recode[df1$hispanic<=199 & df1$hispanic>=100] <- 0
@@ -55,18 +55,24 @@ df1$qtr[df1$month %in% c('04','05','06')] <- 2
 df1$qtr[df1$month %in% c('07','08','09')] <- 3
 df1$qtr[df1$month %in% c('10','11','12')] <- 4
 
+df1$region <- NA
+df1$region[df1$state %in% c('ME','VT','NH','MA','CT','RI','NY','NJ','PA')] <- 'Northeast'
+df1$region[df1$state %in% c('DE','DC','FL','GA','MD','NC','SC','VA','WV','AL','MS','KY','TN','AK','LA','OK','TX')] <- 'South'
+df1$region[df1$state %in% c('AZ','CA','ID','NM','MT','UT','WY','NV','AK','CA','HI','OR','WA')] <- 'West'
+df1$region[df1$state %in% c('IN','IL','MI','OH','WI','IA','KS','MN','MO','NE','ND','SD')] <- 'Midwest'
+
 
 #table(df1$race_ethnicity)
   
 #Create aggregate time series for analysis
 agg1 <- df1 %>%
   bind_rows() %>% 
-  group_by(year, qtr, sex, agec,race_recode) %>%
+  group_by(year, qtr, sex, agec, region, race_recode) %>%
   summarize(N_deaths = n())  %>%
   ungroup  %>%
-  complete(year,qtr, sex, agec,race_recode, fill=list(N_deaths=0)) #fills 0s
+  complete(year,qtr, sex, agec,region,race_recode, fill=list(N_deaths=0)) #fills 0s
 
-saveRDS(agg1,'./Data/Confidential/compiled_sex_age_race_qtr.rds')
+saveRDS(agg1,'./Data/Confidential/compiled_sex_age_race_qtr_region.rds')
 
 
 ## Cause specific deaths
