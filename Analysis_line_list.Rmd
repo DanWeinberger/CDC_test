@@ -328,7 +328,9 @@ mod.lme42 <- stan_glmer(all_cause_pre ~
 Model fit takes about 1 min
 ```{r}
 #RIDGE REGRESSION
+    #https://bitbucket.org/hrue/r-inla/src/0d9389b414979bcf3507c60f69a50488d18e4c6c/r-inla.org/examples/stacks/stacks.R?at=default
 
+ag3.nomiss <- ag3[!is.na(ag3$region),]
 X <- model.matrix(~
               1 + time_scale + qtr2 + qtr3 +qtr4 +
                   agec + race_recode + sex + subgroup_combo +
@@ -338,22 +340,23 @@ X <- model.matrix(~
                   region*(time_scale + qtr2 + qtr3 +qtr4)  + 
               subgroup_combo*(time_scale + qtr2 + qtr3 +qtr4)     
 ,
-                                 data=ag3)
+                                 data=ag3.nomiss)
 
- first.beta<-paste0("f(beta1,", names(X)[1], ",model='iid',hyper = param.beta,", "values=c(", paste(1:ncol(X), collapse=',') ,"))" )
+ first.beta<-paste0("f(beta1,", names(X)[1], "model='iid',hyper = param.beta,", "values=c(", paste(1:ncol(X), collapse=',') ,"))" )
  
-    next.beta.f<-function( covar.index, Xnames){ 
-      paste0("f(beta",covar.index, names(X[-1])[covar.index], ",copy='beta1', fixed=T)")
-    }
-        betas.list<- pbmapply(covar.index=2:ncol(X), Xnames=colnames(X)[-1],next.beta.f,SIMPLIFY=T)
+   param.beta = list(prec = list(param = c(1.0e-3, 1.0e-3))) 
 
-    next.betas<- paste(betas.list, collapse='+')  
+    next.betas <-  paste0("f(beta",2:ncol(X), names(X[-1]), ",copy='beta1', fixed=T)")
+
+    next.betas<- paste(next.betas, collapse='+')  
     all.betas<-paste(first.beta,next.betas , sep='+')   
 
           form1<- as.formula(paste0("all_cause_pre ~",  all.betas    ) )
           
-           mod1.full = inla(form1, data = mod.df.full, 
-                     control.predictor = list(compute=TRUE, link = 1), offset = ag3$log_pop,
+          mod.df <- cbind.data.frame('all_cause_pre'=ag3.nomiss$all_cause_pre, X, 'log_pop'=ag3.nomiss$log_pop)
+          
+           mod1.full = inla(form1, data = mod.df, 
+                     control.predictor = list(compute=TRUE, link = 1), offset = log_pop,
                      family='nbinomial')
 
 # 
