@@ -73,7 +73,9 @@ library(gifski)
 library(gganimate)
 library(shiny)
 library(rjags)
+library(HDInterval)
 library(INLA)
+library(stringr)
 library(lme4)
 #library(jsonlite)
 set.seed(123)
@@ -392,5 +394,47 @@ preds.age <- preds.inla2$preds_covars.m %>%
 
 p1
 ```
+JAGS model
+```{r}
+time.vars <- unique(cbind.data.frame('date'=ag3$date, 'qtr2'=ag3$qtr2, 'qtr3'=ag3$qtr3, 'qtr4'=ag3$qtr4, 'time_Scale'=ag3$time_scale))
 
+ag3.m <- reshape2::melt(ag3[,c('N_deaths','log_pop','agec', 'date','race_recode','sex')], id.vars=c('agec','race_recode','sex','date') )
+
+ag3.c <- acast( ag3.m, variable~agec~race_recode~sex~date)
+
+source('./R/jags_mod1_non_nested.R')
+
+ag4 <- ag3[,c('N_deaths','log_pop','agec', 'date','race_recode','sex')]
+ag4$race.index <- as.numeric(ag4$race_recode)
+ag4$agec.index <- as.numeric(as.factor(ag4$agec))
+ag4$sex.index <- as.numeric(as.factor(ag4$sex))
+ag4$time.index <- as.numeric(as.factor(ag4$date))
+
+#table(ag4$date, ag4$time.index) #check assignments
+
+post_preds2 <- merge(post_preds, ag4, by.x=c('agec','race','sex','time'), by.y=c('agec.index','race.index','sex.index','time.index'))
+
+
+sample_key <- 
+pos_samples <- cbind.data.frame(coords.df)
+```
+
+```{r}
+p1 <- ggplot(post_sample_age, aes(x=time, y=pred_median , group=agec, col=agec)) +
+    geom_line() +
+    geom_line(aes(x=time, y=pred_median, group=agec), lty=2, col='black') +
+    geom_ribbon(aes(ymin=pred_lcl, ymax=pred_ucl), alpha=0.2, col='gray') +
+    ylab("Number of all-cause deaths") +
+    xlab("Date") +
+    theme_classic() +
+    theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
+    geom_hline(yintercept=0, col='gray', lty=2) +
+   # geom_vline(xintercept=as.Date('2020-03-01'), col='gray', lty=2) +
+
+        facet_wrap(~agec , scales='free') +
+   # xlim(as.Date('2014-01-01'), as.Date('2020-12-31')) +
+    theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) 
+
+p1
+```
 
