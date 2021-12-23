@@ -299,75 +299,26 @@ ag3$region <- as.factor(ag3$region)
 
 Simple GLM
 ```{r}
-mod.glm1 <- glm(all_cause_pre ~ 
-                1 + time_scale + qtr2 + qtr3 +qtr4 +
-                  agec + race_recode + sex + region + subgroup_combo +
-                  agec*(time_scale + qtr2 + qtr3 +qtr4) +
-                  race_recode*(time_scale + qtr2 + qtr3 +qtr4) +
-                  region*(time_scale + qtr2 + qtr3 +qtr4)  #+
-                  #subgroup_combo*(time_scale + qtr2 + qtr3 +qtr4)
-                  #sex*(time_scale + sin1 + sin2 + sin3 + cos1 +cos2+ cos3) + 
-                     ,
-                offset = log_pop,
-                family='poisson', data=ag3)
-summary(mod.glm1)
-```
-
-
-```{r, eval=F}
-library(rstanarm)
-
-mod.lme42 <- stan_glmer(all_cause_pre ~ 
-                1 + time_scale +qtr2 + qtr3 +qtr4 +
-                   sex  +(1+time_scale +qtr2 + qtr3 +qtr4|agec) + (1+time_scale +qtr2 + qtr3 +qtr4|race_recode), 
-                offset = log_pop,
-                data=ag3,
-                family='poisson')
-
-```
-
-
-Model fit takes about 1 min
-```{r}
-# #RIDGE REGRESSION
-#     #https://bitbucket.org/hrue/r-inla/src/0d9389b414979bcf3507c60f69a50488d18e4c6c/r-inla.org/examples/stacks/stacks.R?at=default
-# 
-# ag3.nomiss <- ag3[!is.na(ag3$region),]
-# X <- model.matrix(~
-#               -1 + time_scale + qtr2 + qtr3 +qtr4 +
-#                   agec + race_recode + sex + subgroup_combo +
+# mod.glm1 <- glm(all_cause_pre ~ 
+#                 1 + time_scale + qtr2 + qtr3 +qtr4 +
+#                   agec + race_recode + sex + region + subgroup_combo +
 #                   agec*(time_scale + qtr2 + qtr3 +qtr4) +
-#                   race_recode*(time_scale )  +
-#                 #  sex*(time_scale + qtr2 + qtr3 +qtr4) +
-#                   region*(time_scale + qtr2 + qtr3 +qtr4)  + 
-#               subgroup_combo*(time_scale + qtr2 + qtr3 +qtr4)     
-# ,
-#                                  data=ag3.nomiss)
-# 
-#  first.beta<-paste0("f(beta1,", names(X)[1], "model='iid',hyper = param.beta,", "values=c(", paste(1:ncol(X), collapse=',') ,"))" )
-#  
-#    param.beta = list(prec = list(param = c(1.0e-3, 1.0e-3))) 
-# 
-#     next.betas <-  paste0("f(beta",2:ncol(X), names(X[-1]), ",copy='beta1', fixed=T)")
-# 
-#     next.betas<- paste(next.betas, collapse='+')  
-#     all.betas<-paste(first.beta,next.betas , sep='+')   
-# 
-#           form1<- as.formula(paste0("all_cause_pre ~ 1+",  all.betas    ) )
-#           
-#           mod.df <- cbind.data.frame('all_cause_pre'=ag3.nomiss$all_cause_pre, X, 'log_pop'=ag3.nomiss$log_pop)
-#           
-#     mod1.full = inla(form1, data = mod.df, 
-#                      control.predictor = list(compute=TRUE, link = 1), offset = log_pop,
-#                      family='nbinomial')
-# 
-# summary(mod.inla2)
-# 
-# 
-# preds.inla2 <- gen_pred_interval_inla(mod.inla2, ag3)
+#                   race_recode*(time_scale + qtr2 + qtr3 +qtr4) +
+#                   region*(time_scale + qtr2 + qtr3 +qtr4)  #+
+#                   #subgroup_combo*(time_scale + qtr2 + qtr3 +qtr4)
+#                   #sex*(time_scale + sin1 + sin2 + sin3 + cos1 +cos2+ cos3) + 
+#                      ,
+#                 offset = log_pop,
+#                 family='poisson', data=ag3)
+# summary(mod.glm1)
 ```
 
+
+
 ```{r}
+ag3$agec <- as.factor(ag3$agec)
+
+ag3$agec <- relevel(ag3$agec,'11') #set grp 11 as reference--this is highest incidence group and allow us to use N(0,1) priors for all covariates
 
 mod.inla2 <- inla(all_cause_pre ~
               1 + time_scale + qtr2 + qtr3 +qtr4 +
@@ -380,15 +331,13 @@ mod.inla2 <- inla(all_cause_pre ~
                                , offset = log_pop,
                 family='poisson', data=ag3,
                 control.compute=list(config = TRUE),
-              control.fixed=list(mean=0, prec=1)
+              control.fixed=list(mean=0, prec=1) #INFORMATIVE PRIOR
 )
 summary(mod.inla2)
 
 
 preds.inla2 <- gen_pred_interval_inla(mod.inla2, ag3)
 ```
-
-
 
 We can then take the results from the INLA and aggregate over different groups. For example, by age:
 ```{r}
@@ -436,7 +385,7 @@ preds.age.race <- preds.inla2$preds_covars.m %>%
 ```
 
 ```{r}
- p1 <- ggplot(preds.age.race[preds.age.race$agec=='08',], aes(x=date, y=N_deaths )) +
+ p1 <- ggplot(preds.age.race[preds.age.race$agec=='01',], aes(x=date, y=N_deaths )) +
     geom_line() +
     geom_line(aes(x=date, y=pred_median, group=agec), lty=2, col='black') +
     geom_ribbon(aes(ymin=pred_lcl, ymax=pred_ucl), alpha=0.2, col='gray') +
