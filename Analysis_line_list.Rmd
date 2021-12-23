@@ -423,4 +423,33 @@ preds.age <- preds.inla2$preds_covars.m %>%
 p1
 ```
 
+or by age and race
+```{r}
+preds.age.race <- preds.inla2$preds_covars.m %>%
+  group_by(agec,race_recode, date, variable) %>%
+  summarise( 'N_deaths'=sum(N_deaths), 'pred'=sum(value) ) %>%
+  ungroup() %>%
+  group_by(agec, race_recode,date) %>%
+  summarise( 'N_deaths'=mean(N_deaths), 'pred_median'=median(pred), pred_lcl=quantile(pred,probs=0.025), pred_ucl=quantile(pred,probs=0.975) )
 
+
+```
+
+```{r}
+ p1 <- ggplot(preds.age.race[preds.age.race$agec=='08',], aes(x=date, y=N_deaths )) +
+    geom_line() +
+    geom_line(aes(x=date, y=pred_median, group=agec), lty=2, col='black') +
+    geom_ribbon(aes(ymin=pred_lcl, ymax=pred_ucl), alpha=0.2, col='gray') +
+    ylab("Number of all-cause deaths") +
+    xlab("Date") +
+    theme_classic() +
+    theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
+    geom_hline(yintercept=0, col='gray', lty=2) +
+    geom_vline(xintercept=as.Date('2020-03-01'), col='gray', lty=2) +
+
+        facet_wrap(~race_recode , scales='free') +
+    xlim(as.Date('2014-01-01'), as.Date('2020-12-31')) +
+    theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) 
+
+p1
+```
