@@ -304,15 +304,17 @@ mod.glm1 <- glm(all_cause_pre ~
                   agec + race_recode + sex + region + subgroup_combo +
                   agec*(time_scale + qtr2 + qtr3 +qtr4) +
                   race_recode*(time_scale + qtr2 + qtr3 +qtr4) +
-                  region*(time_scale + qtr2 + qtr3 +qtr4)  +
-                  subgroup_combo*(time_scale + qtr2 + qtr3 +qtr4)
+                  region*(time_scale + qtr2 + qtr3 +qtr4)  #+
+                  #subgroup_combo*(time_scale + qtr2 + qtr3 +qtr4)
                   #sex*(time_scale + sin1 + sin2 + sin3 + cos1 +cos2+ cos3) + 
                      ,
                 offset = log_pop,
                 family='poisson', data=ag3)
 summary(mod.glm1)
 ```
-```{r}
+
+
+```{r, eval=F}
 library(rstanarm)
 
 mod.lme42 <- stan_glmer(all_cause_pre ~ 
@@ -327,90 +329,63 @@ mod.lme42 <- stan_glmer(all_cause_pre ~
 
 Model fit takes about 1 min
 ```{r}
-#RIDGE REGRESSION
-    #https://bitbucket.org/hrue/r-inla/src/0d9389b414979bcf3507c60f69a50488d18e4c6c/r-inla.org/examples/stacks/stacks.R?at=default
-
-ag3.nomiss <- ag3[!is.na(ag3$region),]
-X <- model.matrix(~
-              1 + time_scale + qtr2 + qtr3 +qtr4 +
-                  agec + race_recode + sex + subgroup_combo +
-                  agec*(time_scale + qtr2 + qtr3 +qtr4) +
-                  race_recode*(time_scale )  +
-                #  sex*(time_scale + qtr2 + qtr3 +qtr4) +
-                  region*(time_scale + qtr2 + qtr3 +qtr4)  + 
-              subgroup_combo*(time_scale + qtr2 + qtr3 +qtr4)     
-,
-                                 data=ag3.nomiss)
-
- first.beta<-paste0("f(beta1,", names(X)[1], "model='iid',hyper = param.beta,", "values=c(", paste(1:ncol(X), collapse=',') ,"))" )
- 
-   param.beta = list(prec = list(param = c(1.0e-3, 1.0e-3))) 
-
-    next.betas <-  paste0("f(beta",2:ncol(X), names(X[-1]), ",copy='beta1', fixed=T)")
-
-    next.betas<- paste(next.betas, collapse='+')  
-    all.betas<-paste(first.beta,next.betas , sep='+')   
-
-          form1<- as.formula(paste0("all_cause_pre ~",  all.betas    ) )
-          
-          mod.df <- cbind.data.frame('all_cause_pre'=ag3.nomiss$all_cause_pre, X, 'log_pop'=ag3.nomiss$log_pop)
-          
-           mod1.full = inla(form1, data = mod.df, 
-                     control.predictor = list(compute=TRUE, link = 1), offset = log_pop,
-                     family='nbinomial')
-
+# #RIDGE REGRESSION
+#     #https://bitbucket.org/hrue/r-inla/src/0d9389b414979bcf3507c60f69a50488d18e4c6c/r-inla.org/examples/stacks/stacks.R?at=default
 # 
-# mod.inla2 <- inla(all_cause_pre ~
-#               1 + time_scale + qtr2 + qtr3 +qtr4 +
+# ag3.nomiss <- ag3[!is.na(ag3$region),]
+# X <- model.matrix(~
+#               -1 + time_scale + qtr2 + qtr3 +qtr4 +
 #                   agec + race_recode + sex + subgroup_combo +
 #                   agec*(time_scale + qtr2 + qtr3 +qtr4) +
-#                   race_recode*(time_scale + qtr2 + qtr3 +qtr4)  +
-#                   sex*(time_scale + qtr2 + qtr3 +qtr4) +
-#                 region*(time_scale + qtr2 + qtr3 +qtr4)  + 
+#                   race_recode*(time_scale )  +
+#                 #  sex*(time_scale + qtr2 + qtr3 +qtr4) +
+#                   region*(time_scale + qtr2 + qtr3 +qtr4)  + 
 #               subgroup_combo*(time_scale + qtr2 + qtr3 +qtr4)     
 # ,
-#                                 offset = log_pop,
+#                                  data=ag3.nomiss)
 # 
-#                 family='nbinomial', data=ag3,
-#                 control.fixed=priors,
-#                 control.compute=list(config = TRUE))
+#  first.beta<-paste0("f(beta1,", names(X)[1], "model='iid',hyper = param.beta,", "values=c(", paste(1:ncol(X), collapse=',') ,"))" )
+#  
+#    param.beta = list(prec = list(param = c(1.0e-3, 1.0e-3))) 
+# 
+#     next.betas <-  paste0("f(beta",2:ncol(X), names(X[-1]), ",copy='beta1', fixed=T)")
+# 
+#     next.betas<- paste(next.betas, collapse='+')  
+#     all.betas<-paste(first.beta,next.betas , sep='+')   
+# 
+#           form1<- as.formula(paste0("all_cause_pre ~ 1+",  all.betas    ) )
+#           
+#           mod.df <- cbind.data.frame('all_cause_pre'=ag3.nomiss$all_cause_pre, X, 'log_pop'=ag3.nomiss$log_pop)
+#           
+#     mod1.full = inla(form1, data = mod.df, 
+#                      control.predictor = list(compute=TRUE, link = 1), offset = log_pop,
+#                      family='nbinomial')
+# 
+# summary(mod.inla2)
+# 
+# 
+# preds.inla2 <- gen_pred_interval_inla(mod.inla2, ag3)
+```
+
+```{r}
+
+mod.inla2 <- inla(all_cause_pre ~
+              1 + time_scale + qtr2 + qtr3 +qtr4 +
+                  agec + race_recode + sex +  subgroup_combo +
+                  agec*(time_scale + qtr2 + qtr3 +qtr4) +
+                  race_recode*(time_scale + qtr2 + qtr3 +qtr4)+
+                  region*(time_scale + qtr2 + qtr3 +qtr4)
+
+                  #sex*(time_scale + qtr2 + qtr3 +qtr4)
+                               , offset = log_pop,
+                family='poisson', data=ag3,
+                control.compute=list(config = TRUE),
+              control.fixed=list(mean=0, prec=1)
+)
 summary(mod.inla2)
 
 
 preds.inla2 <- gen_pred_interval_inla(mod.inla2, ag3)
-
-
-# prec.prior <- list(prec = list(param = c(0.001, 0.001)))
-# 
-# test.mod <- inla(all_cause_pre ~
-#               1 + time_scale + qtr2 + qtr3 +qtr4 +
-#                     sex  +
-#                 f(agec, model='iid',constr = FALSE,hyper = prec.prior) +
-#                 f(agec2, time_scale, model='iid', hyper = prec.prior) +
-#                  f(agec3, qtr2, model='iid',hyper = prec.prior) +
-#                  f(agec4, qtr3, model='iid', hyper = prec.prior) +
-#                  f(agec5, qtr4, model='iid', hyper = prec.prior) 
-# 
-#                 # f(race_recode, model='iid',scale.model = TRUE, hyper = prec.prior) +
-#                 # f(race_recode2, time_scale, model='iid',scale.model = TRUE, hyper = prec.prior) +
-#                 # f(race_recode3, qtr2, model='iid',scale.model = TRUE, hyper = prec.prior) +
-#                 # f(race_recode4, qtr3, model='iid',scale.model = TRUE, hyper = prec.prior) +
-#                 # f(race_recode5, qtr4, model='iid',scale.model = TRUE, hyper = prec.prior) +
-#                 # 
-#                 # f(subgroup_combo, model='iid',scale.model = TRUE, hyper = prec.prior) +
-#                 # f(subgroup_combo2, time_scale, model='iid',scale.model = TRUE, hyper = prec.prior) +
-#                 # f(subgroup_combo3, qtr2, model='iid',scale.model = TRUE, hyper = prec.prior) +
-#                 # f(subgroup_combo4, qtr3, model='iid',scale.model = TRUE, hyper = prec.prior) +
-#                 # f(subgroup_combo5, qtr4, model='iid',scale.model = TRUE, hyper = prec.prior)
-# 
-#               ,
-#                                 offset = log_pop,
-#                 family='nbinomial', data=ag3,
-#                 control.compute=list(config = TRUE))
-# preds.inla2 <- gen_pred_interval_inla(test.mod, ag3)
-
-
-
 ```
 
 
