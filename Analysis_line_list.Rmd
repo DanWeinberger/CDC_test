@@ -60,11 +60,13 @@ library(plotly)
 library(MMWRweek)
 library(readr)
 library(rjson)
+library(Matrix)
 library(htmlTable)
 library(RSocrata)
 library(pdftools)
 library(readr)
 library(abind)
+library(inlabru)
 library(pbapply)
 library(gsubfn)
 library(dplyr)
@@ -162,10 +164,10 @@ pop2$qtr <- 1 #July 1
 #pop2 <- pop2[pop2$state !='US',]
 
 #This is a hacky fix because we only have pop estimates up until July 2020; assume it is constant until july 2021 for now
-# fill_2021 <- pop2[pop2$year==2020,]
-# fill_2021$year <- 2021
-# 
-# pop2 <- bind_rows(pop2, fill_2021)
+fill_2021 <- pop2[pop2$year==2020,]
+fill_2021$year <- 2021
+
+pop2 <- bind_rows(pop2, fill_2021)
 
 empty_ts <- readRDS('./Data/Confidential/compiled_sex_age_race_qtr_region.rds')
 empty_ts <- empty_ts[,c('agec','sex','region','race_recode','year','qtr')]
@@ -295,24 +297,7 @@ ag3$region <- as.factor(ag3$region)
 #ag3 <- ag3[ag3$year<=2020,]
 ```
 
-## Multilevel model
-
-Simple GLM
-```{r}
-# mod.glm1 <- glm(all_cause_pre ~ 
-#                 1 + time_scale + qtr2 + qtr3 +qtr4 +
-#                   agec + race_recode + sex + region + subgroup_combo +
-#                   agec*(time_scale + qtr2 + qtr3 +qtr4) +
-#                   race_recode*(time_scale + qtr2 + qtr3 +qtr4) +
-#                   region*(time_scale + qtr2 + qtr3 +qtr4)  #+
-#                   #subgroup_combo*(time_scale + qtr2 + qtr3 +qtr4)
-#                   #sex*(time_scale + sin1 + sin2 + sin3 + cos1 +cos2+ cos3) + 
-#                      ,
-#                 offset = log_pop,
-#                 family='poisson', data=ag3)
-# summary(mod.glm1)
-```
-
+## Model
 
 
 ```{r}
@@ -320,23 +305,34 @@ ag3$agec <- as.factor(ag3$agec)
 
 ag3$agec <- relevel(ag3$agec,'11') #set grp 11 as reference--this is highest incidence group and allow us to use N(0,1) priors for all covariates
 
-mod.inla2 <- inla(all_cause_pre ~
+form1 <- as.formula(all_cause_pre ~
               1 + time_scale + qtr2 + qtr3 +qtr4 +
                   agec + race_recode + sex +  subgroup_combo +
                   agec*(time_scale + qtr2 + qtr3 +qtr4) +
                   race_recode*(time_scale + qtr2 + qtr3 +qtr4)+
-                  region*(time_scale + qtr2 + qtr3 +qtr4)
+                  region*(time_scale + qtr2 + qtr3 +qtr4) +
+                offset(log_pop))
 
-                  #sex*(time_scale + qtr2 + qtr3 +qtr4)
-                               , offset = log_pop,
+mod.mat1 <- model.matrix(~
+              1 + time_scale + qtr2 + qtr3 +qtr4 +
+                  agec + race_recode + sex +  subgroup_combo +
+                  agec*(time_scale + qtr2 + qtr3 +qtr4) +
+                  race_recode*(time_scale + qtr2 + qtr3 +qtr4)+
+                  region*(time_scale + qtr2 + qtr3 +qtr4), data=ag3)
+
+mod.mat1 <- as(mod.mat1, "sparseMatrix")
+
+
+
+mod.inla2 <- inla(form1, 
                 family='poisson', data=ag3,
                 control.compute=list(config = TRUE),
               control.fixed=list(mean=0, prec=1) #INFORMATIVE PRIOR
 )
-summary(mod.inla2)
+#summary(mod.inla2)
 
 
-preds.inla2 <- gen_pred_interval_inla(mod.inla2, ag3)
+preds.inla2 <- gen_pred_interval_inla(inla_obj=mod.inla2, covar.df=ag3, mod.mat=mod.mat1 ,log.offset1=ag3$log_pop)
 ```
 
 We can then take the results from the INLA and aggregate over different groups. For example, by age:
@@ -385,7 +381,7 @@ preds.age.race <- preds.inla2$preds_covars.m %>%
 ```
 
 ```{r}
- p1 <- ggplot(preds.age.race[preds.age.race$agec=='01',], aes(x=date, y=N_deaths )) +
+ p1 <- ggplot(preds.age.race[preds.age.race$agec=='11',], aes(x=date, y=N_deaths )) +
     geom_line() +
     geom_line(aes(x=date, y=pred_median, group=agec), lty=2, col='black') +
     geom_ribbon(aes(ymin=pred_lcl, ymax=pred_ucl), alpha=0.2, col='gray') +
@@ -402,3 +398,30 @@ preds.age.race <- preds.inla2$preds_covars.m %>%
 
 p1
 ```
+
+## Ridge regression
+```{r}
+ag3$agec <- as.factor(ag3$agec)
+
+ag3$agec <- relevel(ag3$agec,'11') #set grp 11 as reference--this is highest incidence group and allow us to use N(0,1) priors for all covariates
+
+ag3.complete <- ag3[!is.na(ag3$sex) & !is.na(ag3$time_scale) & !is.na(ag3$race_recode) & !is.na(ag3$all_cause_pre) & !is.na(ag3$region), ]
+
+X <- model.matrix( ~1 + time_scale + qtr2 + qtr3 +qtr4 +
+                  agec + race_recode + sex, data=ag3.complete)
+
+Z <- model.matrix( ~ -1 + agec*(time_scale + qtr2 + qtr3 +qtr4) +
+                  race_recode*(time_scale + qtr2 + qtr3 +qtr4)+
+                  region*(time_scale + qtr2 + qtr3 +qtr4), data=ag3.complete)
+
+Z <- Z[,23:ncol(Z)]
+
+formula1 = all_cause_pre ~ -1 + X + f(id.z, model='z', Z=Z)
+
+result <- inla(formula1 , data=list(all_cause_pre=ag3.complete$all_cause_pre, id.z=as.numeric(dimnames(ag3.complete)[[1]]) ,X=X) )
+
+
+
+preds.inla2 <- gen_pred_interval_inla(mod.inla2, ag3)
+```
+

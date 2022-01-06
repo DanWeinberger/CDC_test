@@ -8,11 +8,11 @@ library(tidyr)
 library(ggplot2)
 
 #the geographic resolution missing from the public data
-
-
-#https://www.cdc.gov/nchs/data_access/vitalstatsonline.htm
+# 
+# 
+# #https://www.cdc.gov/nchs/data_access/vitalstatsonline.htm
 # file.names1<- list('MULT2014.USAllCnty.txt', 'MULT2015.USAllCnty.txt','MULT2016.USAllCnty.txt','MULT2017.USAllCnty.txt',
-#              'Mort2018US.AllCnty.txt','MULT2019US.AllCnty.txt')
+#              'Mort2018US.AllCnty.txt','MULT2019US.AllCnty.txt','MULT2020.USAllCnty.txt')
 # 
 # all.ds <- lapply(file.names1, function(x){
 #   d1 <- read_fwf(file=paste0("./CDC_tapes/CONFIDENTIAL/extracted/" ,x),
@@ -24,9 +24,9 @@ library(ggplot2)
 # })
 # 
 # df1 <- bind_rows(all.ds)
-# saveRDS(df1, './CDC_tapes/compiled_data_county.rds')
+# saveRDS(df1, './CDC_tapes/CONFIDENTIAL/compiled_data_county.rds')
 
-df1 <- readRDS('./CDC_tapes/compiled_data_county.rds')
+df1 <- readRDS('./CDC_tapes/CONFIDENTIAL/compiled_data_county.rds')
 
 df1$hisp_recode <- 999
 df1$hisp_recode[df1$hispanic<=199 & df1$hispanic>=100] <- 0
@@ -57,10 +57,14 @@ df1$qtr[df1$month %in% c('10','11','12')] <- 4
 
 df1$region <- NA
 df1$region[df1$state %in% c('ME','VT','NH','MA','CT','RI','NY','NJ','PA')] <- 'Northeast'
-df1$region[df1$state %in% c('DE','DC','FL','GA','MD','NC','SC','VA','WV','AL','MS','KY','TN','AK','LA','OK','TX')] <- 'South'
-df1$region[df1$state %in% c('AZ','CA','ID','NM','MT','UT','WY','NV','AK','CA','HI','OR','WA')] <- 'West'
+df1$region[df1$state %in% c('DE','DC','FL','GA','MD','NC','SC','VA','WV','AL','MS','KY','TN','AK','LA','OK','TX', 'AR')] <- 'South'
+df1$region[df1$state %in% c('AZ','CA','CO','ID','NM','MT','UT','WY','NV','AK','CA','HI','OR','WA')] <- 'West'
 df1$region[df1$state %in% c('IN','IL','MI','OH','WI','IA','KS','MN','MO','NE','ND','SD')] <- 'Midwest'
 
+
+#table(df1$state,useNA='always')
+#table(df1$region,useNA='always')
+#table(df1$state,df1$region,useNA='always')
 
 #table(df1$race_ethnicity)
   
@@ -70,7 +74,7 @@ agg1 <- df1 %>%
   group_by(year, qtr, sex, agec, region, race_recode) %>%
   summarize(N_deaths = n())  %>%
   ungroup  %>%
-  complete(year,qtr, sex, agec,region,race_recode, fill=list(N_deaths=0)) #fills 0s
+  tidyr::complete(year,qtr, sex, agec,region,race_recode, fill=list(N_deaths=0)) #fills 0s
 
 saveRDS(agg1,'./Data/Confidential/compiled_sex_age_race_qtr_region.rds')
 
