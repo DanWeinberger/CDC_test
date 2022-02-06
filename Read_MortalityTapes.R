@@ -26,7 +26,7 @@ library(ggplot2)
 # df1 <- bind_rows(all.ds)
 # saveRDS(df1, './CDC_tapes/compiled_data.rds')
 
-df1 <- readRDS('./CDC_tapes/compiled_data.rds')
+df1 <- readRDS('./CDC_tapes/confidential/compiled_data_county.rds')
 
 df1$hisp_recode <- 999
 df1$hisp_recode[df1$hispanic<=199 & df1$hispanic>=100] <- 0
@@ -84,6 +84,10 @@ df.rsv <- pbapply(df1[,icd.cols],2, function(x) x %in% rsv.codes )
 
 df.pneumo <- pbapply(df1[,icd.cols],2, function(x) x %in% pneumococcal.codes )
 
+df.pneumo.sepsis <- pbapply(df1[,icd.cols],2, function(x) x %in% 'A403' )
+df.pneumo.pneum <- pbapply(df1[,icd.cols],2, function(x) x %in% 'J13' )
+
+
 df.leg <- pbapply(df1[,icd.cols],2, function(x) x %in% ld.codes )
 
   
@@ -92,6 +96,12 @@ df1$rsv <- 1*(df1$rsv>0) #convert to binary
 
 df1$pneumo <- rowSums(df.pneumo) #how many RSV codes re there per row?
 df1$pneumo <- 1*(df1$pneumo>0) #convert to binary
+
+df1$pneum.sepsis <- rowSums(df.pneumo.sepsis)
+df1$pneum.sepsis <- 1*(df1$pneum.sepsis>0)
+
+df1$pneum.pneu <- rowSums(df.pneumo.pneum)
+df1$pneum.pneu <- 1*(df1$pneum.pneu>0)
 
 df1$ld <- rowSums(df.leg) #how many RSV codes re there per row?
 df1$ld <- 1*(df1$ld>0) #convert to binary
@@ -109,7 +119,7 @@ df1$agey <- as.numeric(df1$age_detail_number)
 #looks at seasonality by cause
 agg1.season <- df1 %>%
   group_by(year,month, agec) %>%
-  summarize(N_deaths = n(), pneumo=sum(pneumo), rsv=sum(rsv), ld=sum(ld)) %>%
+  summarize(N_deaths = n(), pneumo=sum(pneumo),pneum.pneu=sum(pneum.pneu),pneum.sepsis=sum(pneum.sepsis),  rsv=sum(rsv), ld=sum(ld)) %>%
   ungroup()
   
 agg1.season$month <- as.numeric(agg1.season$month)
@@ -147,6 +157,8 @@ p3 <- ggplot(agg1.season, aes(x=month, y=ld, group=year, col=year)) +
   facet_wrap(~ agec , scales='free') 
 p3
 
+
+
 agg1.season.allyr <- df1 %>%
   group_by(agec,month) %>%
   summarize(N_deaths = n(), pneumo=sum(pneumo), rsv=sum(rsv), ld=sum(ld)) %>%
@@ -179,6 +191,89 @@ agg1 <- agg1[order(agg1$agec, agg1$sex, agg1$date),]
 ave.age.ldf <-  df1[df1$ld==1,] %>%
   group_by(month) %>%
   summarize(ave.age  = mean(agey) )
+
+## Broader age groups
+
+df1$agec2 <- NA
+df1$agec2[df1$agey<5 & df1$agey >=0] <- 1
+df1$agec2[df1$agey<18 & df1$agey >=5] <- 2
+df1$agec2[df1$agey<40 & df1$agey >=18] <- 3
+df1$agec2[df1$agey<64 & df1$agey >=40] <- 4
+df1$agec2[df1$agey<80 & df1$agey >=65] <- 5
+df1$agec2[df1$agey<120 & df1$agey >=80] <- 6
+
+
+#looks at seasonality by cause
+agg1.season <- df1 %>%
+  group_by(year,month, agec2) %>%
+  summarize(N_deaths = n(), pneumo=sum(pneumo),pneum.pneu=sum(pneum.pneu),pneum.sepsis=sum(pneum.sepsis),  rsv=sum(rsv), ld=sum(ld)) %>%
+  ungroup()
+
+agg1.season$month <- as.numeric(agg1.season$month)
+
+agg1.season <- agg1.season[agg1.season$agec2 %in% c(1,2,3,4,5,6),]
+
+agg1.season$year <- as.factor(agg1.season$year)
+
+cols.plot <- c(rep('gray',6), 'red')
+
+p1 <- ggplot(agg1.season, aes(x=month, y=pneumo, group=year , color=year)) +
+  geom_line() +
+  scale_color_manual(values=cols.plot) + 
+  ylab("Number of pneumococcal deaths") +
+  xlab("Date") +
+  theme_classic() +
+  theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
+  #geom_hline(yintercept=0, col='gray', lty=2) +
+  facet_wrap(~ agec2 , scales='free') 
+p1
+
+p1b <- ggplot(agg1.season, aes(x=month, y=pneum.pneu, group=year , color=year)) +
+  geom_line() +
+  scale_color_manual(values=cols.plot) + 
+  ylab("Number of pneumococcal pneumonia deaths") +
+  xlab("Date") +
+  theme_classic() +
+  theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
+  #geom_hline(yintercept=0, col='gray', lty=2) +
+  facet_wrap(~ agec2 , scales='free') 
+p1b
+
+p1c <- ggplot(agg1.season, aes(x=month, y=pneum.sepsis, group=year , color=year)) +
+  geom_line() +
+  scale_color_manual(values=cols.plot) + 
+  ylab("Number of pneumococcal sepsis deaths") +
+  xlab("Date") +
+  theme_classic() +
+  theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
+  #geom_hline(yintercept=0, col='gray', lty=2) +
+  facet_wrap(~ agec2 , scales='free') 
+p1c
+
+p2 <- ggplot(agg1.season, aes(x=month, y=rsv, group=year, col=year)) +
+  geom_line() +
+  scale_color_manual(values=cols.plot) + 
+  
+  ylab("Number of RSV deaths") +
+  xlab("Date") +
+  theme_classic() +
+  theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
+  #geom_hline(yintercept=0, col='gray', lty=2) +
+  facet_wrap(~ agec2 , scales='free') 
+p2
+
+
+#Age dist of RSV in first year of life
+rsv.age.dist <- df1[df1$rsv==1,]
+hist(rsv.age.dist$agey)
+table(rsv.age.dist$age_detail_class)
+
+rsv.age.dist$detail.age <- NA
+rsv.age.dist$detail.age[rsv.age.dist$age_detail_class==1] <- as.numeric(rsv.age.dist$age_detail_number[rsv.age.dist$age_detail_class==1])
+rsv.age.dist$detail.age[rsv.age.dist$age_detail_class==2] <- as.numeric(rsv.age.dist$age_detail_number[rsv.age.dist$age_detail_class==2])/12
+rsv.age.dist$detail.age[rsv.age.dist$age_detail_class==4] <- as.numeric(rsv.age.dist$age_detail_number[rsv.age.dist$age_detail_class==4])/365
+hist(rsv.age.dist$detail.age)
+hist(rsv.age.dist$detail.age[rsv.age.dist$detail.age<12])
 
 # Agec
 # 01 ... Under 1 year (includes not stated infant ages)
