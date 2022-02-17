@@ -33,6 +33,36 @@ df1$hisp_recode[df1$hispanic<=199 & df1$hispanic>=100] <- 0
 df1$hisp_recode[df1$hispanic >=200 & df1$hispanic <= 299] <- 1
 #table(df1$hisp_recode)
 
+#EXPORT FOR STEPHANIE
+pneumococcal.codes <- c('A403','J13','B953','G001')
+
+icd.cols <- grep('icd',names(df1)) #Define columns with multiple cause of death stats
+
+df.pneumo <- pbapply(df1[,icd.cols],2, function(x) x %in% pneumococcal.codes )
+
+df1$pneumo <- rowSums(df.pneumo) #how many RSV codes re there per row?
+df1$pneumo <- 1*(df1$pneumo>0) #convert to binary
+
+other.cols <- which(names(df1) %in% c('month','year','sex','race','agec','hispanic'))
+
+
+subset1 <- df1[df1$pneumo==1,]
+
+subset1$agec <- as.factor(subset1$agec)
+subset1$sex <- as.factor(subset1$sex)
+subset1$race <- as.factor(subset1$race)
+subset1$hispanic <- as.factor(subset1$hispanic)
+subset1$month <- as.factor(subset1$month)
+subset1$year <- as.factor(subset1$year)
+
+
+covars <- model.matrix( ~ -1 + agec + sex+ race + month + year, data=subset1)
+
+subset2 <- cbind.data.frame( subset1[,c(icd.cols)], covars )
+
+
+
+
 # df1$race_ethnicity <- 999
 # df1$race_ethnicity[df1$race %in% c('01') & df1$hisp_recode != 1] <- 1 #white, non-Hospanic
 # df1$race_ethnicity[df1$race %in% c('02') & df1$hisp_recode != 1]  <- 2 #black, non-Hispanic
