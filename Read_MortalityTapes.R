@@ -104,7 +104,7 @@ df1$one <-1
 
 rsv.codes <- c('B974','J121', "J210", 'J205') #Define codes for RSV
 
-pneumococcal.codes <- c('A403','J13','B953','G001')
+pneumococcal.codes <- c('A403','J13','B953','G001', 'M001')
 
 ld.codes <- c('A481')
 
@@ -122,19 +122,19 @@ df.leg <- pbapply(df1[,icd.cols],2, function(x) x %in% ld.codes )
 
   
 df1$rsv <- rowSums(df.rsv) #how many RSV codes re there per row?
-df1$rsv <- 1*(df1$rsv>0) #convert to binary
+df1$rsv <- 1*(df1$rsv>0 & !is.na(df1$rsv)) #convert to binary
 
 df1$pneumo <- rowSums(df.pneumo) #how many RSV codes re there per row?
-df1$pneumo <- 1*(df1$pneumo>0) #convert to binary
+df1$pneumo <- 1*(df1$pneumo>0 & !is.na(df1$pneumo)) #convert to binary
 
 df1$pneum.sepsis <- rowSums(df.pneumo.sepsis)
-df1$pneum.sepsis <- 1*(df1$pneum.sepsis>0)
+df1$pneum.sepsis <- 1*(df1$pneum.sepsis>0 & !is.na(df1$pneum.sepsis )  )
 
 df1$pneum.pneu <- rowSums(df.pneumo.pneum)
-df1$pneum.pneu <- 1*(df1$pneum.pneu>0)
+df1$pneum.pneu <- 1*(df1$pneum.pneu>0 & !is.na(df1$pneum.pneu))
 
 df1$ld <- rowSums(df.leg) #how many RSV codes re there per row?
-df1$ld <- 1*(df1$ld>0) #convert to binary
+df1$ld <- 1*(df1$ld>0 & !is.na(df1$ld)) #convert to binary
 
 
 df1$infant <- 0
@@ -144,6 +144,11 @@ df1$infant[df1$age_detail_class %in% c(4,5,6) ] <-1
 df1$agey <- as.numeric(df1$age_detail_number)
 #df1$date <- as.Date(paste(df1$year, df1$month, '01', sep='-'))
 
+df1$region <- NA
+df1$region[df1$state %in% c('ME','VT','NH','MA','CT','RI','NY','NJ','PA')] <- 'Northeast'
+df1$region[df1$state %in% c('DE','DC','FL','GA','MD','NC','SC','VA','WV','AL','MS','KY','TN','LA','OK','TX', 'AR')] <- 'South'
+df1$region[df1$state %in% c('AZ','CA','CO','ID','NM','MT','UT','WY','NV','AK','CA','HI','OR','WA')] <- 'West'
+df1$region[df1$state %in% c('IN','IL','MI','OH','WI','IA','KS','MN','MO','NE','ND','SD')] <- 'Midwest'
 
 
 #looks at seasonality by cause
@@ -239,6 +244,11 @@ agg1.season <- df1 %>%
   summarize(N_deaths = n(), pneumo=sum(pneumo),pneum.pneu=sum(pneum.pneu),pneum.sepsis=sum(pneum.sepsis),  rsv=sum(rsv), ld=sum(ld)) %>%
   ungroup()
 
+all <- df1 %>%
+  group_by(year) %>%
+  summarize(N_deaths = n(), pneumo=sum(pneumo),pneum.pneu=sum(pneum.pneu),pneum.sepsis=sum(pneum.sepsis),  rsv=sum(rsv), ld=sum(ld)) %>%
+  ungroup()
+
 agg1.season$month <- as.numeric(agg1.season$month)
 
 agg1.season <- agg1.season[agg1.season$agec2 %in% c(1,2,3,4,5,6),]
@@ -291,6 +301,51 @@ p2 <- ggplot(agg1.season, aes(x=month, y=rsv, group=year, col=year)) +
   #geom_hline(yintercept=0, col='gray', lty=2) +
   facet_wrap(~ agec2 , scales='free') 
 p2
+
+
+#All ages aggregated
+agg1.seasona.age <- df1 %>%
+  group_by(year,month) %>%
+  summarize(N_deaths = n(), pneumo=sum(pneumo),pneum.pneu=sum(pneum.pneu),pneum.sepsis=sum(pneum.sepsis),  rsv=sum(rsv), ld=sum(ld)) %>%
+  ungroup()
+
+agg1.seasona.age$year <- as.factor(agg1.seasona.age$year)
+
+p1b <- ggplot(agg1.seasona.age, aes(x=month, y=pneum.sepsis, group=year , color=year)) +
+  geom_line() +
+  scale_color_manual(values=cols.plot) + 
+  ylab("Number of pneumococcal pneumonia deaths") +
+  xlab("Date") +
+ theme_classic()   
+p1b
+
+
+
+#All ages aggregated by region
+agg1.seasona.age2 <- df1 %>%
+  group_by(region,year,month) %>%
+  summarize(N_deaths = n(), pneumo=sum(pneumo),pneum.pneu=sum(pneum.pneu),pneum.sepsis=sum(pneum.sepsis),  rsv=sum(rsv), ld=sum(ld)) %>%
+  ungroup()
+
+agg1.seasona.age2$year <- as.factor(agg1.seasona.age2$year)
+
+p1b <- ggplot(agg1.seasona.age2, aes(x=month, y=pneum.pneu, group=year , color=year)) +
+  geom_line() +
+  scale_color_manual(values=cols.plot) + 
+  ylab("Number of pneumococcal pneumonia deaths") +
+  xlab("Date") +
+  theme_classic()   +
+  facet_wrap(~region, scales='free')
+p1b
+
+p1b <- ggplot(agg1.seasona.age2, aes(x=month, y=pneum.sepsis, group=year , color=year)) +
+  geom_line() +
+  scale_color_manual(values=cols.plot) + 
+  ylab("Number of pneumococcal sepsis deaths") +
+  xlab("Date") +
+  theme_classic()   +
+  facet_wrap(~region, scales='free')
+p1b
 
 
 #Age dist of RSV in first year of life
