@@ -11,23 +11,38 @@ library(ggplot2)
 
 
 #https://www.cdc.gov/nchs/data_access/vitalstatsonline.htm
-# file.names1<- list('VS14MORT.DUSMCPUB', 'VS15MORT.DUSMCPUB','VS16MORT.DUSMCPUB','VS17MORT.DUSMCPUB',
-#              'Mort2018US.PubUse.txt','VS19MORT.DUSMCPUB_r20210304')
-# 
-# all.ds <- lapply(file.names1, function(x){
-#   d1 <- read_fwf(file=paste0("./CDC_tapes/" ,x),
-#                  fwf_positions(start=c(20,21,65,69,102,445,70,71, 79,484,146,167,174,181,188,195,202,209,216,223,230,237,244,251,258,265,272,279,286,293,300),
-#                                end=c(20,34,66,69,105,446,  70,73, 80,486,149, 171,178,185,192,199,206,213,220,227,234,241,248,255,262,269,276,283,290,297,304),
-#                                col_names = c('res_status','state','month','sex','year','race','age_detail_class','age_detail_number','agec','hispanic', paste0('icd', 1:21 ) )),
-#                   guess_max=10000)
-#   return(d1)
-# })
-# 
-# df1 <- bind_rows(all.ds)
-# saveRDS(df1, './CDC_tapes/compiled_data.rds')
+file.names1<- list('VS14MORT.DUSMCPUB', 'VS15MORT.DUSMCPUB','VS16MORT.DUSMCPUB','VS17MORT.DUSMCPUB',
+             'Mort2018US.PubUse.txt','VS19MORT.DUSMCPUB_r20210304')
+
+all.ds <- lapply(file.names1, function(x){
+  d1 <- read_fwf(file=paste0("./CDC_tapes/" ,x),
+                 fwf_positions(start=c(20,21,65,69,102,445,61, 63, 64,70,71, 79,484,146,167,174,181,188,195,202,209,216,223,230,237,244,251,258,265,272,279,286,293,300),
+                               end=c(20,34,66,69,105,446, 62,63,64, 70,73, 80,486,149, 171,178,185,192,199,206,213,220,227,234,241,248,255,262,269,276,283,290,297,304),
+                               col_names = c('res_status','state','month','sex','year','race','education1989','education2003', 'education_missing','age_detail_class','age_detail_number','agec','hispanic', paste0('icd', 1:21 ) )),
+                  guess_max=10000)
+  return(d1)
+})
+
+df1 <- bind_rows(all.ds)
+saveRDS(df1, './CDC_tapes/compiled_data.rds')
 
 df1 <- readRDS('./CDC_tapes/confidential/compiled_data_county.rds')
 
+df1$education_recode <- NA
+df1$education_recode[df1$education_missing==2 |df1$education1989==99 | df1$education2003==9 ] <- 999
+
+#high school or less
+df1$education_recode[df1$education_missing==0 & df1$education1989>=0 & df1$education1989<=12] <- 1
+df1$education_recode[df1$education_missing==1 &df1$education2003>=1 & df1$education2003<=3] <- 1
+
+df1$education_recode[df1$education_missing==0 & df1$education1989 %in% c(13,14,15)] <- 2
+df1$education_recode[df1$education_missing==1 & df1$education2003 %in% c(4,5)] <- 2
+
+df1$education_recode[df1$education_missing==0 & df1$education1989 %in% c(16,17)] <- 3
+df1$education_recode[df1$education_missing==1 & df1$education2003 %in% c(6,7,8)] <- 3
+
+  
+  
 df1$hisp_recode <- 999
 df1$hisp_recode[df1$hispanic<=199 & df1$hispanic>=100] <- 0
 df1$hisp_recode[df1$hispanic >=200 & df1$hispanic <= 299] <- 1
@@ -248,7 +263,9 @@ all <- df1 %>%
   group_by(year) %>%
   summarize(N_deaths = n(), pneumo=sum(pneumo),pneum.pneu=sum(pneum.pneu),pneum.sepsis=sum(pneum.sepsis),  rsv=sum(rsv), ld=sum(ld)) %>%
   ungroup()
-
+all2 <- df1 %>%
+  summarize(N_deaths = n(), pneumo=sum(pneumo),pneum.pneu=sum(pneum.pneu),pneum.sepsis=sum(pneum.sepsis),  rsv=sum(rsv), ld=sum(ld)) %>%
+  ungroup()
 agg1.season$month <- as.numeric(agg1.season$month)
 
 agg1.season <- agg1.season[agg1.season$agec2 %in% c(1,2,3,4,5,6),]
@@ -348,6 +365,25 @@ p1b <- ggplot(agg1.seasona.age2, aes(x=month, y=pneum.sepsis, group=year , color
 p1b
 
 
+#looks at seasonality by education
+agg1.season.educ <- df1 %>%
+  group_by(year,month, education_recode) %>%
+  summarize(N_deaths = n(), pneumo=sum(pneumo),pneum.pneu=sum(pneum.pneu),pneum.sepsis=sum(pneum.sepsis),  rsv=sum(rsv), ld=sum(ld)) %>%
+  ungroup()
+agg1.season.educ$education_recode <- as.factor(agg1.season.educ$education_recode)
+agg1.season.educ$year <- as.factor(agg1.season.educ$year)
+
+p1b <- ggplot(agg1.season.educ, aes(x=month, y=pneum.pneu, group=year , color=year)) +
+  geom_line() +
+  scale_color_manual(values=cols.plot) + 
+  ylab("Number of pneumococcal sepsis deaths") +
+  xlab("Date") +
+  theme_classic()   +
+  facet_wrap(~education_recode, scales='free')
+p1b
+
+
+
 #Age dist of RSV in first year of life
 rsv.age.dist <- df1[df1$rsv==1,]
 hist(rsv.age.dist$agey)
@@ -407,3 +443,25 @@ hist(rsv.age.dist$detail.age[rsv.age.dist$detail.age<12])
 # 250-259 … Latin American
 # 280-299 ... Other Hispanic
 # 996-999 ... Unknown
+
+## apriori
+library(arules)
+df.pneumo <- df1[df1$pneumo==1, ]
+covars <- c('agec', 'hispanic','education_recode','qtr','race_recode','sex')
+
+df.pneumo <- df.pneumo[, c('icd1','icd2','icd3','icd4','icd5','icd6','icd7','icd8','icd9','icd10','icd11','icd12','icd13','icd14', covars)]
+
+df.pneumo <- as.data.frame(apply(df.pneumo,2, function(x) as.factor(x)))
+
+
+mod.mat1 <- as.data.frame(model.matrix(~. , data=df.pneumo))
+mod.mat1 <- apply(mod.mat1,2, function(x) as.logical(x))
+
+items1 <- cbind.data.frame(mod.mat1, df.pneumo[, grep('icd', names(df.pneumo))])
+
+items2 <- apply(items1, 1, function(x) paste(x, collapse=','))
+
+trObj<-as(items1,"transactions")
+summary(trObj)
+mb1 <- apriori(trObj, parameter = list(supp=0.001, conf=0.25,maxlen=10),appearance = list(default="lhs",rhs="J13"))
+inspect(mb1)
